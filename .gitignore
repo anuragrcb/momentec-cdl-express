@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+data/uploads/
+data/requests/*.json
+!data/requests/.gitkeep
+.DS_Store
+*.log
+.smoketest-samples/
