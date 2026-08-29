@@ -3,10 +3,17 @@ node_modules/
 out/
 .env
 .env.local
+.env*.local
+.vercel
 data/uploads/
 data/requests/*.json
 !data/requests/.gitkeep
+data/artwork-packages/
 .DS_Store
 *.log
 .smoketest-samples/
 tsconfig.tsbuildinfo
+.claude/
+.diagnostics/
+.next-incomplete-*/
+.next-stale-*/

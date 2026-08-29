@@ -1,98 +1,131 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Wordmark } from "@/components/Wordmark";
 
+const PROCESS = [
+  { number: "1", time: "~1 min", title: "Upload your design", copy: "Add the front, back and side references you have. The original artwork remains attached to the job." },
+  { number: "2", time: "AI mapped", title: "Review every mark", copy: "Confirm the detected logos, colors, names, numbers, patterns and their exact garment placements." },
+  { number: "3", time: "Real catalog", title: "Choose the garment", copy: "Match the design to the real Momentec and Augusta catalog instead of an invented AI garment." },
+  { number: "4", time: "Interactive", title: "Approve the 3D proof", copy: "Inspect the selected size from the front, back and both sides on the manufacturer model." },
+  { number: "5", time: "Artist ready", title: "Handoff the package", copy: "Review extracted source assets and editable SVG references, then submit one organized package to the artist." },
+];
+
 export default function HomePage() {
   return (
-    <>
-      <header className="site-header">
-        <div className="wrap inner">
-          <Wordmark />
-          <span className="tagline">Outfitting moments that matter</span>
+    <div className="marketing-page">
+      <header className="marketing-header">
+        <div className="marketing-header-inner">
+          <Wordmark official />
+          <nav aria-label="Main navigation">
+            <a href="#how">How It Works</a>
+            <Link href="/design?mode=submit">AI Studio</Link>
+            <a href="mailto:aicreator@momentecbrands.com">Contact</a>
+          </nav>
+          <Link className="btn marketing-header-cta" href="/design?mode=submit">Submit My Design</Link>
         </div>
       </header>
 
-      <section className="hero">
-        <div className="wrap">
-          <div className="hero-kicker">AI Design → Real Jersey, Fast</div>
-          <h1>Your AI design. Matched, previewed, submitted — in minutes.</h1>
-          <p className="lead">
-            Already have a design from Midjourney, ChatGPT, or your own artist? Upload it, we&apos;ll
-            identify the sport, garment and colors, match it to a real Momentec / Augusta style, and
-            show you a 3D preview before it ever reaches an artist.
-          </p>
-          <div className="cta-row">
-            <Link href="/design?mode=submit" className="btn btn-primary">
-              Submit My AI Design
-            </Link>
-            <Link href="/design?mode=start" className="btn btn-secondary">
-              Start My AI Design
-            </Link>
-          </div>
+      <main>
+        <section className="marketing-hero">
+          <div className="marketing-hero-inner">
+            <div className="marketing-hero-copy">
+              <Image className="marketing-ai-logo" src="/momentec-ai-studio.png" alt="Momentec AI Studio" width={720} height={279} priority />
+              <p className="marketing-kicker">AI concept to manufacturer-matched proof</p>
+              <h1>Your AI design.<br /><span>Mapped precisely.</span><br />Artist-ready.</h1>
+              <p className="marketing-lead">Upload the design you already have. Momentec AI Studio maps every visible mark, matches a real garment, builds a size-specific 3D proof and prepares one reviewable artwork package.</p>
+              <div className="marketing-actions">
+                <Link href="/design?mode=submit" className="btn btn-primary">Submit My AI Design</Link>
+                <a href="#how" className="btn btn-secondary">See How It Works</a>
+              </div>
+            </div>
 
-          <div className="entry-grid">
-            <div className="entry-card">
-              <span className="step-no">Primary flow</span>
-              <h3>Submit My AI Design</h3>
-              <p>
-                You already have front (and maybe back/side) artwork. Upload it, confirm what our AI
-                read off it, pick the closest real style, preview it in 3D where available, and send
-                it to an artist for review.
-              </p>
-              <span className="badge">Built &amp; working</span>
-            </div>
-            <div className="entry-card">
-              <span className="step-no">Coming soon</span>
-              <h3>Start My AI Design</h3>
-              <p>
-                Generate a brand-new concept from scratch with guided prompts, right inside CDL
-                Express. This entry point is a placeholder for now — the primary use case below is
-                what&apos;s actually built.
-              </p>
-              <span className="badge">Stub only</span>
+            <div className="marketing-proof-story" aria-label="From AI concept to finished garment">
+              <article className="marketing-proof-card concept-card">
+                <div className="marketing-proof-image">
+                  <Image src="/momentec-ai-concept.jpg" alt="AI-generated soccer jersey concept, front and back" fill sizes="(max-width: 900px) 80vw, 360px" priority />
+                </div>
+                <div><span>01</span><strong>AI-generated concept</strong></div>
+              </article>
+              <span className="marketing-story-arrow" aria-hidden="true">→</span>
+              <article className="marketing-proof-card athlete-card">
+                <div className="marketing-proof-image">
+                  <Image src="/momentec-finished-athlete.jpg" alt="Athlete wearing the finished sublimated jersey" fill sizes="(max-width: 900px) 60vw, 280px" priority />
+                </div>
+                <div><span>02</span><strong>Finished M-Sublimation</strong></div>
+              </article>
             </div>
           </div>
+        </section>
+
+        <div className="grad-rule" />
+
+        <section className="marketing-launch-band">
+          <div>
+            <span>Built for teams, dealers and artists</span>
+            <h2>Bring the design you have.<br />Leave with a complete handoff.</h2>
+          </div>
+          <Link href="/design?mode=submit" className="btn btn-secondary">Open AI Studio <span aria-hidden="true">↗</span></Link>
+        </section>
+
+        <section className="marketing-process" id="how">
+          <div className="marketing-section-copy">
+            <p className="marketing-kicker">The process</p>
+            <h2>From reference image to one organized package.</h2>
+            <p>No disconnected tools and no mystery handoff. The source views, garment choice, 3D approval and extracted artwork stay connected as one design record.</p>
+          </div>
+          <div className="marketing-process-grid">
+            {PROCESS.map((item) => (
+              <article key={item.number}>
+                <div className="marketing-process-meta"><span>{item.number}</span><b>{item.time}</b></div>
+                <h3>{item.title}</h3>
+                <p>{item.copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="marketing-feature">
+          <div className="marketing-feature-copy">
+            <p className="marketing-kicker">One source of truth</p>
+            <h2>Every view. Every mark. Every deliverable.</h2>
+            <p>The artist sees the same approved proof the customer reviewed, plus the original crops, mapped placements, production comments and Illustrator reference package.</p>
+            <ul>
+              <li>Per-view logo, name, number and pattern extraction</li>
+              <li>Manufacturer style and size coupling</li>
+              <li>Four editable SVG reference sheets when Magnific is enabled</li>
+            </ul>
+          </div>
+          <div className="marketing-feature-visual" aria-hidden="true">
+            <div className="feature-orbit orbit-one" />
+            <div className="feature-orbit orbit-two" />
+            <div className="feature-core"><span>AI</span><strong>ARTWORK<br />PACKAGE</strong></div>
+            <span className="feature-chip chip-one">3D proof</span>
+            <span className="feature-chip chip-two">Source assets</span>
+            <span className="feature-chip chip-three">SVG package</span>
+          </div>
+        </section>
+
+        <section className="marketing-final-cta">
+          <div>
+            <p className="marketing-kicker">Already have an AI design?</p>
+            <h2>Turn it into a proof your production team can use.</h2>
+            <p>Start with the images you already have. The studio keeps the visual intent while making every handoff decision visible.</p>
+          </div>
+          <Link href="/design?mode=submit" className="btn btn-secondary">Submit My AI Design</Link>
+        </section>
+      </main>
+
+      <footer className="marketing-footer">
+        <div>
+          <Wordmark official />
+          <nav aria-label="Footer navigation">
+            <a href="#how">How It Works</a>
+            <Link href="/design?mode=submit">AI Studio</Link>
+            <a href="mailto:aicreator@momentecbrands.com">Contact</a>
+          </nav>
+          <span>© Momentec Brands Inc. All Rights Reserved</span>
         </div>
-      </section>
-
-      <section className="strip">
-        <div className="wrap">
-          <h2>How Submit My AI Design works</h2>
-          <div className="steps">
-            <div className="step">
-              <div className="num">01</div>
-              <h4>Upload</h4>
-              <p>Front image required, back/left/right optional. Know your style number? Add it.</p>
-            </div>
-            <div className="step">
-              <div className="num">02</div>
-              <h4>Confirm the read</h4>
-              <p>Our AI reads sport, garment type and colors off your art — you review and correct it.</p>
-            </div>
-            <div className="step">
-              <div className="num">03</div>
-              <h4>Match &amp; preview</h4>
-              <p>Pick from real Momentec/Augusta styles. Four styles get a live 3D preview today.</p>
-            </div>
-            <div className="step">
-              <div className="num">04</div>
-              <h4>Submit for review</h4>
-              <p>Add comments and send it — an artist picks it up from here.</p>
-            </div>
-          </div>
-
-          <div className="honesty-note">
-            <strong>Honest scope:</strong> this produces a design match, an editable AI read of your
-            artwork, and a real-time 3D preview on the actual garment mesh where one exists. It does
-            not produce production-ready cut-piece files, and only 4 of our 364 catalogue styles
-            currently have a working 3D preview — every other style can still be identified and
-            matched by name, and your design is recorded either way.
-          </div>
-        </div>
-      </section>
-
-      <footer className="site-footer">
-        <div className="wrap">Momentec Brands — CDL Express (internal prototype, not production COMS)</div>
       </footer>
-    </>
+    </div>
   );
 }

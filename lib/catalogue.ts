@@ -1,16 +1,38 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ArtworkAnalysis, CatalogueStyle, StyleMatch } from "./types";
-import { hasMesh } from "./types";
+import { hasApparel3dPreview } from "./apparel-assets";
 
 const CATALOGUE_PATH = path.join(process.cwd(), "data", "template-library.json");
 
 let cache: CatalogueStyle[] | null = null;
 
+const VERIFIED_EXTERNAL_STYLES: CatalogueStyle[] = [
+  {
+    parentSku: "J180A",
+    name: "FS Full Button Baseball Jersey",
+    division: "Under Armour",
+    sport: "Baseball",
+    garmentType: "Top",
+    category: "Baseball",
+    sizes: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"],
+    coreSizesPresent: true,
+    colorCount: 0,
+    msrp: "0.00",
+    image: "",
+    w2pTemplate: "prod-J180A-decorations.svg",
+    w2pUrlBase: "https://d31q5t9naund0c.cloudfront.net/onebuilder/svgfilesstage-pim2/",
+    renderable: true,
+    renderBytes: 898688,
+    renderSize: "S/M/L size-specific GLBs",
+  },
+];
+
 export function loadCatalogue(): CatalogueStyle[] {
   if (cache) return cache;
   const raw = fs.readFileSync(CATALOGUE_PATH, "utf8");
-  cache = JSON.parse(raw) as CatalogueStyle[];
+  const copiedCatalogue = JSON.parse(raw) as CatalogueStyle[];
+  cache = [...VERIFIED_EXTERNAL_STYLES, ...copiedCatalogue.filter((style) => style.parentSku !== "J180A")];
   return cache;
 }
 
@@ -83,7 +105,7 @@ export function scoreStyle(analysis: ArtworkAnalysis, style: CatalogueStyle): { 
   // don't crowd out plausible tops when the read is thin.
   if (nameTokens.has("jersey")) score += 5;
 
-  if (hasMesh(style.parentSku)) {
+  if (hasApparel3dPreview(style.parentSku)) {
     score += 3; // tiny nudge - a usable 3D preview is a better experience, not a better match
     reasons.push("has a real 3D preview available");
   }
@@ -97,7 +119,7 @@ export function matchStyles(analysis: ArtworkAnalysis, limit = 8): StyleMatch[] 
     .filter((s) => s.renderable !== false)
     .map((style) => {
       const { score, reasons } = scoreStyle(analysis, style);
-      return { style, score, reasons, has3dPreview: hasMesh(style.parentSku) };
+      return { style, score, reasons, has3dPreview: hasApparel3dPreview(style.parentSku) };
     })
     .filter((m) => m.score > 0)
     .sort((a, b) => b.score - a.score || (b.has3dPreview ? 1 : 0) - (a.has3dPreview ? 1 : 0));
@@ -109,7 +131,7 @@ export function matchStyles(analysis: ArtworkAnalysis, limit = 8): StyleMatch[] 
   // clearly ranked below the real matches.
   const already = new Set(scored.map((m) => m.style.parentSku));
   const fallback = catalogue
-    .filter((s) => hasMesh(s.parentSku) && !already.has(s.parentSku))
+    .filter((s) => hasApparel3dPreview(s.parentSku) && !already.has(s.parentSku))
     .map((style) => ({ style, score: 1, reasons: ["shown as a fallback - has a real 3D preview"], has3dPreview: true }));
 
   return [...scored, ...fallback].slice(0, limit);

@@ -1,9 +1,22 @@
 import Link from "next/link";
+import Image from "next/image";
 
-// No real Momentec logo file exists in this project - this is a clean,
-// text-based wordmark built in their black/white house style, not a
-// fabricated logo asset.
-export function Wordmark() {
+export function Wordmark({ official = false }: { official?: boolean }) {
+  if (official) {
+    return (
+      <Link href="/" className="wordmark wordmark-official" aria-label="M Custom Sublimation by Momentec Brands">
+        <Image
+          src="/m-custom-momentec-logo.png"
+          alt="M Custom Sublimation by Momentec Brands"
+          width={600}
+          height={172}
+          priority
+          className="wordmark-logo"
+        />
+      </Link>
+    );
+  }
+
   return (
     <Link href="/" className="wordmark">
       <span className="m">M</span>

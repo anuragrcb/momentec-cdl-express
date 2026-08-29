@@ -1,5 +1,7 @@
 # Momentec CDL Express
 
+> Deployment: see [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for private Blob storage, Magnific MCP configuration, limits and verification.
+
 A standalone Next.js app for **Momentec Brands** (parent of Augusta Sportswear,
 Holloway and other team-uniform brands — "outfitting moments that matter").
 Customers upload artwork they already have (AI-generated or original), the app
@@ -8,17 +10,31 @@ catalogue style, previews it in 3D on the real garment mesh where available,
 and records the request for artist review.
 
 This is a **brand-new, fully standalone project** — it is not part of the
-JourneyAX/Caroma-Poc monorepo, imports nothing from it at runtime, and has its
-own `package.json` / `.git`. It sits alongside the sibling
-`3d-garment-retexture` service and calls it over plain HTTP, treating it as a
-black box.
+JourneyAX/Caroma-Poc monorepo and imports nothing from it at runtime, and has
+its own `package.json` / `.git`. It calls the **actively-developed**
+`3d-garment-retexture` service that lives inside `Caroma-Poc/` over plain
+HTTP, treating it as a black box.
 
 ```
 JourneyAX/
-  Caroma-Poc/                 (unrelated monorepo — not touched by this app)
-  3d-garment-retexture/       (sibling service, its own repo — not modified)
+  Caroma-Poc/
+    3d-garment-retexture/     (the REAL sibling service this app calls — its
+                                own repo, its own .env, not modified by this app)
+    ...                       (rest of the monorepo — unrelated, not touched)
+  3d-garment-retexture/       (a STALE, untouched-since-Aug-13 snapshot — do
+                                NOT point this app at it; kept only for
+                                historical reference, has a materially
+                                different/older /api/jobs contract)
   momentec-cdl-express/       (this project)
 ```
+
+**Important:** an earlier pass of this app was wired to the wrong copy (the
+stale top-level `3d-garment-retexture/`). It has since been repointed at the
+real, actively-developed copy under `Caroma-Poc/3d-garment-retexture/`, whose
+`/api/jobs` contract is richer — it accepts optional `backImg`/`leftImg`/
+`rightImg` multipart fields (this app already collects those in step 1 and now
+sends them along), and supports a `mode=augusta` value in addition to
+`match`/`transfer` (not used by this app — see below).
 
 ## What's real vs. what's a stub
 
@@ -45,7 +61,11 @@ JourneyAX/
   catalogue, copied verbatim from
   `Caroma-Poc/journeyAX/data/cdl/template-library.json`.
 - `assets/meshes/{228108,228103,228187,227132}.glb` — the 4 real garment
-  meshes, copied from `Caroma-Poc/3d-garment-retexture/{models,samples}/`.
+  meshes, copied from `Caroma-Poc/3d-garment-retexture/{models,samples}/`
+  (228108 and 228103 from `models/`, 228187 and 227132 from `samples/` — that
+  project doesn't keep all four in the same folder). Re-verified byte-for-byte
+  identical (sha256) against that source on the latest pass, then re-copied
+  anyway for provenance.
 
 **Built new, standalone:** everything else — all app code, the matching
 algorithm, the upload/analyze/bake/submit API routes, the three.js viewer, and
@@ -89,20 +109,25 @@ momentec-cdl-express/
 ## Running it
 
 You need **two** processes running: this app, and the sibling
-`3d-garment-retexture` service it calls over HTTP.
+`3d-garment-retexture` service it calls over HTTP — **the real one, at
+`Caroma-Poc/3d-garment-retexture`**, not the stale top-level copy.
 
 ### 1. The sibling retexture service
 
 ```bash
-cd ../3d-garment-retexture
-npm install && npm run setup      # first time only
-cp .env.example .env              # required even if you leave it empty
-npm start                         # http://localhost:3000
+cd ../Caroma-Poc/3d-garment-retexture
+npm install                       # first time only
+# .env already exists in that project with PORT=4000 and its own API keys —
+# do not overwrite it; it's a live, actively-developed project, not a template.
+npm start                         # http://localhost:4000
 ```
 
-`GEMINI_API_KEY` in **that** service's `.env` is only needed for generated
-back/side views, which this app does not currently request (it always bakes
-in "match this garment" mode, front only, so it works without that key).
+`GEMINI_API_KEY` in **that** service's `.env` is only needed for
+Gemini-*synthesized* views (a back/left/right view neither uploaded manually
+nor supplied on disk). This app now always sends its own manually-captured
+back/left/right images when the customer provided them in step 1, so they get
+baked without needing that key at all — only the front-only fallback path (no
+back/left/right uploaded) is fully key-independent by design.
 
 ### 2. This app
 
@@ -110,33 +135,54 @@ in "match this garment" mode, front only, so it works without that key).
 npm install
 cp .env.example .env
 # set GEMINI_API_KEY in .env for real AI analysis of uploaded artwork
-# (RETEXTURE_SERVICE_URL defaults to http://localhost:3000, correct out of the box)
+# (RETEXTURE_SERVICE_URL defaults to http://localhost:4000, correct out of the box —
+#  matching the real sibling service's own configured PORT=4000)
 npm run dev                       # http://localhost:3200
 ```
 
 Runs on **:3200** deliberately, so it never collides with the sibling
-service's default **:3000**.
+service's own **:4000**.
 
 ### Environment variables (this app's `.env`)
 
 | Key | Required for | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | `/api/analyze` (AI read of uploaded artwork) | Without it, analyze returns an honest "AI analysis is unavailable" placeholder with empty fields you fill in yourself — the rest of the flow still works. Get one from https://aistudio.google.com/apikey |
-| `RETEXTURE_SERVICE_URL` | `/api/bake`, `/api/bake/status`, GLB proxy | Defaults to `http://localhost:3000`. |
+| `RETEXTURE_SERVICE_URL` | `/api/bake`, `/api/bake/status`, GLB proxy | Defaults to `http://localhost:4000`, matching `Caroma-Poc/3d-garment-retexture`'s own `.env` (`PORT=4000`). |
 
 ## The sibling service's real API contract (as integrated against)
 
-Read directly from its `server.js` / `pipeline.js`, not assumed:
+Read directly from `Caroma-Poc/3d-garment-retexture`'s current `server.js` /
+`pipeline.js` (its API has diverged from the stale top-level copy — do not
+assume that one's contract still applies):
 
 | Route | Contract |
 |---|---|
-| `POST /api/jobs` | multipart form: `glb`, `reference` files, plus `mode` (`match`\|`transfer`), `gemini` (`'true'`\|`'false'`), `views`, `tier`, `size`, `colors`, `keep`, `backText`. Returns `202 { id }`. |
-| `GET /api/jobs/:id` | `{ id, status: queued\|running\|done\|failed, stage: prep\|render\|views\|bake\|null, error, stats, log[], files: string[] }`. Poll this. |
+| `POST /api/jobs` | multipart form: `glb`, `reference` files (required), plus optional `backImg`, `leftImg`, `rightImg` files, plus `mode` (`match`\|`transfer`\|`augusta`), `gemini` (`'true'`\|`'false'`), `views`, `tier`, `size`, `colors`, `keep`, `backText`. Returns `202 { id }`. |
+| `GET /api/jobs/:id` | `{ id, status: queued\|running\|done\|failed, stage, error, stats, log[], files: string[] }`. Poll this. |
 | `GET /api/jobs/:id/files/:name` | Raw bytes of one output file. `"glb"` is the baked model's file label once `status === "done"`. |
 
 This app's `lib/retexture-client.ts` always sends `mode=match, gemini=false` —
-it projects the customer's own uploaded front image directly onto the mesh's
-front panel, which needs no Gemini call on the retexture service's side.
+it projects the customer's own uploaded front (and, when supplied, back/left/
+right) images directly onto the mesh, which needs no Gemini call on the
+retexture service's side. `backImg`/`leftImg`/`rightImg` are prepped
+(background-cut) and baked into the atlas unconditionally in `match` mode —
+they don't require `gemini=true`; that flag only controls *synthesizing* a
+view that wasn't supplied at all.
+
+**`mode=augusta` was deliberately not adopted here.** It runs a completely
+different pipeline on the retexture service's side — it classifies the
+reference image's construction (sport/neckline/sleeves) with an LLM, matches
+it against Augusta's own style registry, and picks the GLB model *for you*
+from that registry, discarding the uploaded `glb`. This app already does its
+own style matching against a separate 364-style catalogue
+(`data/template-library.json` via `/api/match-style`) and already knows which
+SKU (and therefore which local mesh) it wants baked — running Augusta's
+classifier/matcher again on top would just contradict this app's own match
+step. `match` mode is the correct fit; the richer part of `augusta` mode this
+app *does* benefit from is the multi-image (`backImg`/`leftImg`/`rightImg`)
+support, which is shared plumbing available in `match` mode too and is now
+wired through.
 
 ## Verification status (honest)
 
