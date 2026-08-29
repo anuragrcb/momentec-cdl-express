@@ -1,10 +1,13 @@
 import "server-only";
 
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { get, put } from "@vercel/blob";
 
-const PACKAGE_ROOT = path.join(process.cwd(), "data", "artwork-packages");
+const PACKAGE_ROOT = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? path.join(os.tmpdir(), "data", "artwork-packages")
+  : path.join(process.cwd(), "data", "artwork-packages");
 const BLOB_PREFIX = "cdl-express/artwork-packages";
 
 function safePart(value: string, label: string): string {

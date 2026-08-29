@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { generateProof, type TripoInput, type TripoView } from "@/lib/tripo";
+import { readUpload, saveUpload } from "@/lib/upload-store";
 
 export const runtime = "nodejs";
 // a 4-view standard run measured ~172s, capped at Vercel 300s limit
@@ -26,7 +25,6 @@ export async function POST(req: NextRequest) {
   if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
     return NextResponse.json({ error: "A valid sessionId is required." }, { status: 400 });
   }
-  const dir = path.join(process.cwd(), "data", "uploads", sessionId);
 
   const inputs: TripoInput[] = [];
   for (const view of VIEWS) {
@@ -40,16 +38,17 @@ export async function POST(req: NextRequest) {
     );
     if (!m) continue;
     const ext = m[2];
-    const file = path.join(dir, m[1]);
     try {
-      await fs.access(file);
-      inputs.push({
-        view,
-        path: file,
-        mime: ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg",
-      });
+      const file = await readUpload(sessionId, m[1]);
+      if (file) {
+        inputs.push({
+          view,
+          buffer: file.buffer,
+          mime: file.contentType || (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg"),
+        });
+      }
     } catch {
-      /* view not on disk - skip it rather than fail the whole run */
+      /* view not found - skip it rather than fail the whole run */
     }
   }
 
@@ -71,14 +70,13 @@ export async function POST(req: NextRequest) {
   // pull the glb local so the viewer is not dependent on Tripo's CDN link,
   // which is time-limited
   const glb = Buffer.from(await (await fetch(result.modelUrl)).arrayBuffer());
-  await fs.writeFile(path.join(dir, "tripo-proof.glb"), glb);
+  const glbUrl = await saveUpload(sessionId, "tripo-proof.glb", glb, "model/gltf-binary");
 
   let previewUrl: string | undefined;
   if (result.previewUrl) {
     try {
       const png = Buffer.from(await (await fetch(result.previewUrl)).arrayBuffer());
-      await fs.writeFile(path.join(dir, "tripo-preview.webp"), png);
-      previewUrl = `/api/uploads/${sessionId}/tripo-preview.webp`;
+      previewUrl = await saveUpload(sessionId, "tripo-preview.webp", png, "image/webp");
     } catch {
       /* preview is a nicety, not required */
     }
@@ -86,7 +84,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     status: "success",
-    glbUrl: `/api/uploads/${sessionId}/tripo-proof.glb`,
+    glbUrl,
     previewUrl,
     viewsUsed: inputs.map((i) => i.view),
     seconds: result.seconds,

@@ -100,7 +100,8 @@ async function uploadFile(bytes: Buffer, filename: string, mime: string): Promis
 
 export interface TripoInput {
   view: TripoView;
-  path: string;
+  path?: string;
+  buffer?: Buffer;
   mime: string;
 }
 
@@ -131,7 +132,8 @@ export async function generateProof(
     // upload every view, then reference them by token
     const tokens: Partial<Record<TripoView, string>> = {};
     for (const input of inputs) {
-      const bytes = await fs.readFile(input.path);
+      const bytes = input.buffer || (input.path ? await fs.readFile(input.path) : null);
+      if (!bytes) throw new Error(`No image data for ${input.view}`);
       tokens[input.view] = await uploadFile(bytes, `${input.view}.img`, input.mime);
     }
 

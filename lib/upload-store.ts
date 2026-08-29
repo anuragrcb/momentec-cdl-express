@@ -1,10 +1,13 @@
 import "server-only";
 
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { get, list, put } from "@vercel/blob";
 
-const LOCAL_ROOT = path.join(process.cwd(), "data", "uploads");
+const LOCAL_ROOT = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? path.join(os.tmpdir(), "data", "uploads")
+  : path.join(process.cwd(), "data", "uploads");
 const BLOB_PREFIX = "cdl-express/uploads";
 
 function safePart(value: string, label: string): string {
