@@ -4,9 +4,8 @@ import path from "node:path";
 import { generateProof, type TripoInput, type TripoView } from "@/lib/tripo";
 
 export const runtime = "nodejs";
-// a 4-view standard run measured ~172s, and it lingers near 99% while the
-// texture bakes, so allow well beyond the observed worst case
-export const maxDuration = 600;
+// a 4-view standard run measured ~172s, capped at Vercel 300s limit
+export const maxDuration = 300;
 
 const VIEWS: TripoView[] = ["front", "left", "back", "right"];
 
