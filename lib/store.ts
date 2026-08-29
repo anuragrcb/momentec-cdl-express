@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { get, list, put } from "@vercel/blob";
 import type { MockupRequest } from "./types";
 
-const REQUESTS_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+const REQUESTS_DIR = process.env.VERCEL || process.env.K_SERVICE
   ? path.join(os.tmpdir(), "data", "requests")
   : path.join(process.cwd(), "data", "requests");
 const BLOB_PREFIX = "cdl-express/requests";

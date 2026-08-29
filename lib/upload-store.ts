@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { get, list, put } from "@vercel/blob";
 
-const LOCAL_ROOT = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+const LOCAL_ROOT = process.env.VERCEL || process.env.K_SERVICE
   ? path.join(os.tmpdir(), "data", "uploads")
   : path.join(process.cwd(), "data", "uploads");
 const BLOB_PREFIX = "cdl-express/uploads";
