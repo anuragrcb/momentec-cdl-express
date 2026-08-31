@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
     // only accept a URL this pipeline itself issued for this session
-    const match = url.match(new RegExp(`^/api/uploads/${sessionId}/(${view}\\.(png|jpg|jpeg|webp))$`));
+    const match = url.match(new RegExp(`^/api/uploads/${sessionId}/(${view}(?:-prepared)?\\.(png|jpg|jpeg|webp))$`));
     if (!match) {
       missing.push(view);
       continue;
