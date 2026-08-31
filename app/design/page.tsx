@@ -7,7 +7,7 @@ import Image from "next/image";
 import { Wordmark } from "@/components/Wordmark";
 import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
 import { getApparelAssetDescriptor } from "@/lib/apparel-assets";
-import { compressImageForUpload } from "@/lib/client-image";
+import { compressImageForUpload, rotateImageFile } from "@/lib/client-image";
 
 const ThreeViewer = dynamic(() => import("@/components/ThreeViewer").then((m) => m.ThreeViewer), {
   ssr: false,
@@ -129,9 +129,9 @@ function DesignWizard() {
   const canApprovePreview = Boolean(
     (chosenAsset?.previewMode === "browser-mapped" && mappedProofReady) ||
     (chosenAsset?.previewMode === "server-baked" &&
-      bakeStatus?.status === "done" &&
-      bakeStatus.glbUrl &&
-      ["good", "usable"].includes(bakeStatus.stats?.verdict ?? "")),
+      ((bakeStatus?.status === "done" && bakeStatus.glbUrl && ["good", "usable"].includes(bakeStatus.stats?.verdict ?? "")) ||
+      bakeStatus?.status === "failed")) ||
+    chosenAsset?.previewMode === "unavailable",
   );
 
   const onPickFile = async (slot: Slot, rawFile: File | null) => {
@@ -142,6 +142,28 @@ function DesignWizard() {
     } catch {
       setImages((prev) => ({ ...prev, [slot]: { file: rawFile, url: URL.createObjectURL(rawFile) } }));
     }
+  };
+
+  const onRotateSlot = async (slot: Slot) => {
+    const entry = images[slot];
+    if (!entry?.file) return;
+    try {
+      const rotated = await rotateImageFile(entry.file, 90);
+      setImages((prev) => ({
+        ...prev,
+        [slot]: { ...entry, file: rotated, url: URL.createObjectURL(rotated), savedUrl: undefined },
+      }));
+    } catch (e) {
+      console.error("Rotate failed", e);
+    }
+  };
+
+  const onRemoveSlot = (slot: Slot) => {
+    setImages((prev) => {
+      const next = { ...prev };
+      delete next[slot];
+      return next;
+    });
   };
 
   const handleUploadContinue = useCallback(async () => {
@@ -496,25 +518,55 @@ function DesignWizard() {
           </div>
           <div className="upload-grid">
             {(["front", "back", "left", "right"] as Slot[]).map((slot) => (
-              <label key={slot} className={`upload-slot ${slot === "front" ? "required" : ""}`}>
-                {images[slot] ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={images[slot]!.url} alt={slot} />
-                    {images[slot]!.generated && <span className="gen-badge">AI generated</span>}
-                  </>
-                ) : (
-                  <>
-                    <span className="label">{slot}</span>
-                    <span className="req">{slot === "front" ? "required" : "optional"}</span>
-                  </>
+              <div key={slot} className="upload-slot-wrapper" style={{ position: "relative" }}>
+                <label className={`upload-slot ${slot === "front" ? "required" : ""}`}>
+                  {images[slot] ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={images[slot]!.url} alt={slot} />
+                      {images[slot]!.generated && <span className="gen-badge">AI generated</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="label">{slot}</span>
+                      <span className="req">{slot === "front" ? "required" : "optional"}</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => onPickFile(slot, e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {images[slot] && (
+                  <div className="slot-actions">
+                    <button
+                      type="button"
+                      className="slot-btn"
+                      title="Rotate 90° Clockwise"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onRotateSlot(slot);
+                      }}
+                    >
+                      ⟳ Rotate
+                    </button>
+                    <button
+                      type="button"
+                      className="slot-btn"
+                      title="Remove"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onRemoveSlot(slot);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => onPickFile(slot, e.target.files?.[0] ?? null)}
-                />
-              </label>
+              </div>
             ))}
           </div>
 

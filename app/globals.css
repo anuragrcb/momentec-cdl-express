@@ -1213,3 +1213,39 @@ button {
   .marketing-footer > div { padding: 24px 18px; }
   .marketing-footer nav { flex-wrap: wrap; gap: 18px; }
 }
+
+.upload-slot-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.slot-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+.slot-btn {
+  background: rgba(18, 18, 18, 0.85);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease;
+}
+
+.slot-btn:hover {
+  background: #000000;
+  border-color: #ffd700;
+  color: #ffd700;
+  transform: translateY(-1px);
+}
+
