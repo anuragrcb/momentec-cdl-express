@@ -819,22 +819,20 @@ function DesignWizard() {
           )}
 
           {getApparelAssetDescriptor(chosen.style.parentSku).previewMode === "browser-mapped" && (
-            <div>
+            <div className="proof-viewer-wrap">
               {chosenAsset?.sizeModelUrls && chosenAsset.cutPieceSvgUrl && images.front && (
-                <div className="viewer-wrap" style={{ height: "auto" }}>
-                  <J180AProof
-                    frontImageUrl={images.front.savedUrl || images.front.url}
-                    backImageUrl={images.back?.savedUrl || images.back?.url}
-                    leftImageUrl={images.left?.savedUrl || images.left?.url}
-                    rightImageUrl={images.right?.savedUrl || images.right?.url}
-                    modelUrls={chosenAsset.sizeModelUrls}
-                    cutSvgUrl={chosenAsset.cutPieceSvgUrl}
-                    normalMapUrl={chosenAsset.normalMapUrl}
-                    size={proofSize}
-                    onReady={setMappedProofReady}
-                    onWarning={setMappedProofWarning}
-                  />
-                </div>
+                <J180AProof
+                  frontImageUrl={images.front.savedUrl || images.front.url}
+                  backImageUrl={images.back?.savedUrl || images.back?.url}
+                  leftImageUrl={images.left?.savedUrl || images.left?.url}
+                  rightImageUrl={images.right?.savedUrl || images.right?.url}
+                  modelUrls={chosenAsset.sizeModelUrls}
+                  cutSvgUrl={chosenAsset.cutPieceSvgUrl}
+                  normalMapUrl={chosenAsset.normalMapUrl}
+                  size={proofSize}
+                  onReady={setMappedProofReady}
+                  onWarning={setMappedProofWarning}
+                />
               )}
               {mappedProofWarning && (
                 <div className="viewer-status" style={{ marginTop: 12, background: "#3a2a12", border: "1px solid #7a5a1e" }}>

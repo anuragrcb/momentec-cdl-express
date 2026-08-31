@@ -19,7 +19,7 @@ export function ThreeViewer({ glbUrl }: { glbUrl: string }) {
     const height = mount.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf4f4f2);
+    scene.background = new THREE.Color(0xffffff);
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 100);
     camera.position.set(0, 1.2, 2.6);
