@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Wordmark } from "@/components/Wordmark";
 import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
 import { getApparelAssetDescriptor } from "@/lib/apparel-assets";
+import { compressImageForUpload } from "@/lib/client-image";
 
 const ThreeViewer = dynamic(() => import("@/components/ThreeViewer").then((m) => m.ThreeViewer), {
   ssr: false,
@@ -97,6 +98,9 @@ function StubNotice() {
 }
 
 function DesignWizard() {
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode") || "submit";
+
   const [step, setStep] = useState<Step>("upload");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [images, setImages] = useState<Partial<Record<Slot, ImageState>>>({});
@@ -130,9 +134,14 @@ function DesignWizard() {
       ["good", "usable"].includes(bakeStatus.stats?.verdict ?? "")),
   );
 
-  const onPickFile = (slot: Slot, file: File | null) => {
-    if (!file) return;
-    setImages((prev) => ({ ...prev, [slot]: { file, url: URL.createObjectURL(file) } }));
+  const onPickFile = async (slot: Slot, rawFile: File | null) => {
+    if (!rawFile) return;
+    try {
+      const file = await compressImageForUpload(rawFile);
+      setImages((prev) => ({ ...prev, [slot]: { file, url: URL.createObjectURL(file) } }));
+    } catch {
+      setImages((prev) => ({ ...prev, [slot]: { file: rawFile, url: URL.createObjectURL(rawFile) } }));
+    }
   };
 
   const handleUploadContinue = useCallback(async () => {
@@ -145,10 +154,13 @@ function DesignWizard() {
     try {
       const form = new FormData();
       if (sessionId) form.append("sessionId", sessionId);
-      (Object.keys(images) as Slot[]).forEach((slot) => {
+      for (const slot of Object.keys(images) as Slot[]) {
         const entry = images[slot];
-        if (entry) form.append(slot, entry.file);
-      });
+        if (entry?.file) {
+          const fileToUpload = await compressImageForUpload(entry.file);
+          form.append(slot, fileToUpload);
+        }
+      }
       const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
       const uploadData = await safeFetchJson(uploadRes, "Upload failed.");
       setSessionId(uploadData.sessionId);
@@ -202,10 +214,13 @@ function DesignWizard() {
     try {
       const form = new FormData();
       if (sessionId) form.append("sessionId", sessionId);
-      (Object.keys(images) as Slot[]).forEach((slot) => {
+      for (const slot of Object.keys(images) as Slot[]) {
         const entry = images[slot];
-        if (entry) form.append(slot, entry.file);
-      });
+        if (entry?.file) {
+          const fileToUpload = await compressImageForUpload(entry.file);
+          form.append(slot, fileToUpload);
+        }
+      }
       const upRes = await fetch("/api/upload", { method: "POST", body: form });
       const upData = await safeFetchJson(upRes, "Upload failed.");
       setSessionId(upData.sessionId);
