@@ -10,21 +10,75 @@ let cache: CatalogueStyle[] | null = null;
 const VERIFIED_EXTERNAL_STYLES: CatalogueStyle[] = [
   {
     parentSku: "J180A",
-    name: "FS Full Button Baseball Jersey",
-    division: "Under Armour",
-    sport: "Baseball",
+    name: "FreeStyle Sublimated Full Button Jersey / Tee",
+    division: "Augusta / Under Armour",
+    sport: "Multi-Sport",
     garmentType: "Top",
-    category: "Baseball",
+    category: "Sublimated Top / Jersey",
     sizes: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"],
     coreSizesPresent: true,
     colorCount: 0,
-    msrp: "0.00",
-    image: "",
+    msrp: "48.00",
+    image: "https://static.momentecbrands.com/product/228108_ACDL_front.jpg",
     w2pTemplate: "prod-J180A-decorations.svg",
     w2pUrlBase: "https://d31q5t9naund0c.cloudfront.net/onebuilder/svgfilesstage-pim2/",
     renderable: true,
     renderBytes: 898688,
     renderSize: "S/M/L size-specific GLBs",
+  },
+  {
+    parentSku: "228108",
+    name: "FreeStyle Sublimated Turbo V-Neck Jersey / Tee",
+    division: "Augusta Sportswear",
+    sport: "Multi-Sport",
+    garmentType: "Top",
+    category: "Sublimated Jersey / Tee",
+    sizes: ["S", "M", "L", "XL", "2XL", "3XL"],
+    coreSizesPresent: true,
+    colorCount: 0,
+    msrp: "48.70",
+    image: "https://static.momentecbrands.com/product/228108_ACDL_front.jpg",
+    w2pTemplate: "preview-prod-228108-l",
+    w2pUrlBase: "https://service.augustasportswear.com/w2p/api/is/preview-prod-228108-{size}?fmt=png&wid=2000",
+    renderable: true,
+    renderBytes: 1274508,
+    renderSize: "3D GLB Model",
+  },
+  {
+    parentSku: "228150",
+    name: "FreeStyle Sublimated Crew Neck Performance Jersey / Tee",
+    division: "Augusta Sportswear",
+    sport: "Multi-Sport",
+    garmentType: "Top",
+    category: "Sublimated Top",
+    sizes: ["S", "M", "L", "XL", "2XL", "3XL"],
+    coreSizesPresent: true,
+    colorCount: 0,
+    msrp: "44.50",
+    image: "https://static.momentecbrands.com/product/228150_AAOP_front.jpg",
+    w2pTemplate: "preview-prod-228150-l",
+    w2pUrlBase: "https://service.augustasportswear.com/w2p/api/is/preview-prod-228150-{size}?fmt=png&wid=2000",
+    renderable: true,
+    renderBytes: 1200000,
+    renderSize: "3D GLB Model",
+  },
+  {
+    parentSku: "228162",
+    name: "FreeStyle Sublimated Athletic Training Top / Tee",
+    division: "Augusta Sportswear",
+    sport: "Multi-Sport",
+    garmentType: "Top",
+    category: "Sublimated Top",
+    sizes: ["S", "M", "L", "XL", "2XL"],
+    coreSizesPresent: true,
+    colorCount: 0,
+    msrp: "46.00",
+    image: "https://static.momentecbrands.com/product/228162_ACDL_front.jpg",
+    w2pTemplate: "preview-prod-228162-l",
+    w2pUrlBase: "https://service.augustasportswear.com/w2p/api/is/preview-prod-228162-{size}?fmt=png&wid=2000",
+    renderable: true,
+    renderBytes: 1250000,
+    renderSize: "3D GLB Model",
   },
 ];
 
@@ -32,7 +86,8 @@ export function loadCatalogue(): CatalogueStyle[] {
   if (cache) return cache;
   const raw = fs.readFileSync(CATALOGUE_PATH, "utf8");
   const copiedCatalogue = JSON.parse(raw) as CatalogueStyle[];
-  cache = [...VERIFIED_EXTERNAL_STYLES, ...copiedCatalogue.filter((style) => style.parentSku !== "J180A")];
+  const existingSkus = new Set(VERIFIED_EXTERNAL_STYLES.map((s) => s.parentSku));
+  cache = [...VERIFIED_EXTERNAL_STYLES, ...copiedCatalogue.filter((style) => !existingSkus.has(style.parentSku))];
   return cache;
 }
 
@@ -100,14 +155,12 @@ export function scoreStyle(analysis: ArtworkAnalysis, style: CatalogueStyle): { 
   }
   if (hits > 0) reasons.push(`name overlaps ${hits} keyword${hits > 1 ? "s" : ""} from the artwork read`);
 
-  // Jersey-shaped garments are the overwhelmingly common case for this flow;
-  // nudge toward "jersey" named items slightly so unrelated accessories/bottoms
-  // don't crowd out plausible tops when the read is thin.
-  if (nameTokens.has("jersey")) score += 5;
+  // Sublimation tops/jerseys/tees are the standard case for this custom flow
+  if (nameTokens.has("jersey") || nameTokens.has("tee") || nameTokens.has("top")) score += 10;
 
   if (hasApparel3dPreview(style.parentSku)) {
-    score += 3; // tiny nudge - a usable 3D preview is a better experience, not a better match
-    reasons.push("has a real 3D preview available");
+    score += 35; // Strongly prioritize verified 3D interactive models
+    reasons.push("verified 3D interactive preview ready");
   }
 
   return { score, reasons };

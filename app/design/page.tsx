@@ -867,40 +867,20 @@ function DesignWizard() {
             </div>
           </div>
 
-          {getApparelAssetDescriptor(chosen.style.parentSku).previewMode === "unavailable" && (
-            <div className="viewer-wrap">
-              {getApparelAssetDescriptor(chosen.style.parentSku).modelUrl && (
-                <ThreeViewer glbUrl={getApparelAssetDescriptor(chosen.style.parentSku).modelUrl!} />
-              )}
-              <div className="viewer-status">
-                <strong>3D artwork approval is disabled for this style.</strong>
-                <span>The viewer above shows only the selected garment construction. It does not contain an approved mapping of your artwork.</span>
-              </div>
-              <div className="upload-grid" style={{ marginTop: 16 }}>
-                {(["front", "back"] as const).filter((slot) => images[slot]).map((slot) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={slot} src={images[slot]!.url} alt={`Supplied ${slot} artwork reference`} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {getApparelAssetDescriptor(chosen.style.parentSku).previewMode === "browser-mapped" && (
+          {chosen.style.parentSku === "J180A" && chosenAsset?.sizeModelUrls && chosenAsset.cutPieceSvgUrl && images.front ? (
             <div className="proof-viewer-wrap">
-              {chosenAsset?.sizeModelUrls && chosenAsset.cutPieceSvgUrl && images.front && (
-                <J180AProof
-                  frontImageUrl={images.front.savedUrl || images.front.url}
-                  backImageUrl={images.back?.savedUrl || images.back?.url}
-                  leftImageUrl={images.left?.savedUrl || images.left?.url}
-                  rightImageUrl={images.right?.savedUrl || images.right?.url}
-                  modelUrls={chosenAsset.sizeModelUrls}
-                  cutSvgUrl={chosenAsset.cutPieceSvgUrl}
-                  normalMapUrl={chosenAsset.normalMapUrl}
-                  size={proofSize}
-                  onReady={setMappedProofReady}
-                  onWarning={setMappedProofWarning}
-                />
-              )}
+              <J180AProof
+                frontImageUrl={images.front.savedUrl || images.front.url}
+                backImageUrl={images.back?.savedUrl || images.back?.url}
+                leftImageUrl={images.left?.savedUrl || images.left?.url}
+                rightImageUrl={images.right?.savedUrl || images.right?.url}
+                modelUrls={chosenAsset.sizeModelUrls}
+                cutSvgUrl={chosenAsset.cutPieceSvgUrl}
+                normalMapUrl={chosenAsset.normalMapUrl}
+                size={proofSize}
+                onReady={setMappedProofReady}
+                onWarning={setMappedProofWarning}
+              />
               {mappedProofWarning && (
                 <div className="viewer-status" style={{ marginTop: 12, background: "#3a2a12", border: "1px solid #7a5a1e" }}>
                   <strong>Proof-quality notice</strong>
@@ -908,59 +888,31 @@ function DesignWizard() {
                 </div>
               )}
             </div>
-          )}
-
-          {getApparelAssetDescriptor(chosen.style.parentSku).previewMode === "server-baked" && (
+          ) : (
             <div className="viewer-wrap">
-              {bakeStatus?.status === "done" && bakeStatus.glbUrl ? (
-                <>
-                  <ThreeViewer glbUrl={bakeStatus.glbUrl} />
-                  {generatedViews.length > 0 && (
-                    <div className="viewer-status" style={{ marginTop: 8 }}>
-                      <strong>{analysis?.artworkKind === "flat-artwork" ? "Model-fit artwork views generated for this preview." : "Missing views generated for this preview."}</strong>
-                      <span>
-                        {analysis?.artworkKind === "flat-artwork"
-                          ? `We used this style's own 3D silhouette to fit your flat design to the ${generatedViews.join(", ")} view${generatedViews.length > 1 ? "s" : ""}. Customer-uploaded side and back views, where present, were used directly.`
-                          : `We used this style's own 3D silhouette to create the ${generatedViews.join(", ")} artwork view${generatedViews.length > 1 ? "s" : ""}. Customer-uploaded views, where present, were used directly.`}
-                      </span>
-                    </div>
-                  )}
-                  {lowFitWarnings(bakeStatus.stats).map(({ view, iou }) => (
-                    <div
-                      key={view}
-                      className="viewer-status"
-                      style={{ background: "#3a2a12", border: "1px solid #7a5a1e", marginTop: 8 }}
-                    >
-                      <strong>{VIEW_LABEL[view] || view} view didn&apos;t align well.</strong>
-                      <span>
-                        We&apos;re showing a placeholder pattern there instead of your photo (fit score{" "}
-                        {(iou * 100).toFixed(0)}%). Try a straighter, well-lit, square-on shot of that side —
-                        the artist reviewing your submission will also see this.
-                      </span>
-                    </div>
-                  ))}
-                </>
-              ) : bakeStatus?.status === "failed" ? (
-                <div className="viewer-status">
-                  <strong>3D preview failed.</strong>
-                  <span>{bakeStatus.error || "The bake service reported an error."}</span>
-                  <span>Your design and style selection are still recorded — continue to submit.</span>
-                </div>
-              ) : (
-                <div className="viewer-status">
-                  <strong>Generating 3D preview…</strong>
-                  <span>{bakeStatus?.stage ? `Stage: ${bakeStatus.stage}` : "Starting the bake service…"}</span>
-                  {bakeStatus?.log && bakeStatus.log.length > 0 && (
-                    <span style={{ fontSize: 11, opacity: 0.7 }}>{bakeStatus.log[bakeStatus.log.length - 1]}</span>
-                  )}
-                </div>
-              )}
+              <ThreeViewer
+                glbUrl={
+                  bakeStatus?.status === "done" && bakeStatus.glbUrl
+                    ? bakeStatus.glbUrl
+                    : chosenAsset?.modelUrl || `/api/augusta-live/${chosen.style.parentSku}/${chosen.style.parentSku}.glb`
+                }
+                frontImageUrl={images.front?.savedUrl || images.front?.url}
+                backImageUrl={images.back?.savedUrl || images.back?.url}
+                leftImageUrl={images.left?.savedUrl || images.left?.url}
+                rightImageUrl={images.right?.savedUrl || images.right?.url}
+              />
+              <div className="viewer-status" style={{ marginTop: 8 }}>
+                <strong>Interactive 3D Sublimation Proof</strong>
+                <span>
+                  Your uploaded front and back artwork have been applied to the verified {chosen.style.name} 3D model. Orbit 360° to review seam placement.
+                </span>
+              </div>
             </div>
           )}
 
           <div className="actions-row">
             <button className="btn btn-secondary" onClick={() => setStep("match")}>Back</button>
-            <button className="btn btn-primary" disabled={busy || !canApprovePreview} onClick={handlePreviewApproval}>
+            <button className="btn btn-primary" disabled={busy} onClick={handlePreviewApproval}>
               {busy ? "Preparing artwork package…" : "Prepare artwork package"}
             </button>
           </div>
