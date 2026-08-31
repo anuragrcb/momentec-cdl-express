@@ -8,7 +8,7 @@ import type { ArtworkView, VectorAssetKind } from "@/lib/types";
 const MCP_URL = "https://mcp.magnific.com/mcp";
 const TOKEN_URL = "https://auth.magnific.com/realms/mcp/protocol/openid-connect/token";
 const MODEL = process.env.MAGNIFIC_MCP_MODEL || "imagen-nano-banana-2";
-const POLL_TIMEOUT_MS = 5 * 60_000;
+const POLL_TIMEOUT_MS = 25_000;
 const PROMPT_LIMIT = 3000;
 
 type SourceView = { view: ArtworkView; buffer: Buffer; mimeType: string };

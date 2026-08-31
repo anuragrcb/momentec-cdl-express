@@ -4,7 +4,7 @@ import type { ArtworkAnalysis, ArtworkRegion, ArtworkRegionType, ArtworkView } f
 // Same key source pattern as the sibling 3d-garment-retexture service:
 // GEMINI_API_KEY read from this app's own .env (via @nestjs/config-free plain
 // process.env here, since this is a standalone Next.js app, not JourneyAX).
-const MODEL_ID = "gemini-3.6-flash";
+const MODEL_ID = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 const BASE_PROMPT = `You are analyzing customer-owned team-sports uniform reference images for an artist handoff.
 One or more labelled views may be supplied. Inspect EVERY supplied view independently. Identify only visible

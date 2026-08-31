@@ -52,6 +52,20 @@ const VIEW_LABEL: Record<string, string> = {
 // placeholder colour instead of the customer's photo.
 const POOR_FIT_IOU = 0.75;
 
+async function safeFetchJson<T = any>(res: Response, fallbackError = "Request failed."): Promise<T> {
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(res.ok ? "Invalid server response format." : `${fallbackError} (${res.status}): ${text.slice(0, 150)}`);
+  }
+  if (!res.ok) {
+    throw new Error(data?.error || data?.message || fallbackError);
+  }
+  return data as T;
+}
+
 /** Per-view camera-fit warnings worth telling the customer about. */
 function lowFitWarnings(stats: BakeStats | undefined): { view: string; iou: number }[] {
   if (!stats?.views) return [];
@@ -136,8 +150,7 @@ function DesignWizard() {
         if (entry) form.append(slot, entry.file);
       });
       const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error || "Upload failed.");
+      const uploadData = await safeFetchJson(uploadRes, "Upload failed.");
       setSessionId(uploadData.sessionId);
       setImages((prev) => {
         const next = { ...prev };
@@ -166,8 +179,7 @@ function DesignWizard() {
           sku: knownStyleNumber.trim() || undefined,
         }),
       });
-      const analyzeData = await analyzeRes.json();
-      if (!analyzeRes.ok) throw new Error(analyzeData.error || "Analysis failed.");
+      const analyzeData = await safeFetchJson(analyzeRes, "Analysis failed.");
       setAnalysis(analyzeData.analysis);
       setStep("analyze");
     } catch (err) {
@@ -195,8 +207,7 @@ function DesignWizard() {
         if (entry) form.append(slot, entry.file);
       });
       const upRes = await fetch("/api/upload", { method: "POST", body: form });
-      const upData = await upRes.json();
-      if (!upRes.ok) throw new Error(upData.error || "Upload failed.");
+      const upData = await safeFetchJson(upRes, "Upload failed.");
       setSessionId(upData.sessionId);
 
       const res = await fetch("/api/generate-views", {
@@ -204,8 +215,7 @@ function DesignWizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: upData.sessionId, views: upData.urls }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "View generation failed.");
+      const data = await safeFetchJson(res, "View generation failed.");
 
       setViewGenNote(data.message ?? null);
       setGeneratedViews(data.generatedViews ?? []);
@@ -251,8 +261,7 @@ function DesignWizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ analysis, knownStyleNumber }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Matching failed.");
+      const data = await safeFetchJson(res, "Matching failed.");
       setMatches(data.matches);
       const enteredSku = knownStyleNumber.trim();
       // A validated customer-entered SKU is the default physical model. The
@@ -304,8 +313,7 @@ function DesignWizard() {
             backNumber: analysis?.backNumber,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to start 3D preview.");
+        const data = await safeFetchJson(res, "Failed to start 3D preview.");
         setBakeJobId(data.id);
         setGeneratedViews(data.generatedViews || []);
       } catch (err) {
@@ -321,7 +329,7 @@ function DesignWizard() {
     const poll = async () => {
       try {
         const res = await fetch(`/api/bake/status?id=${bakeJobId}`, { cache: "no-store" });
-        const data: BakeStatus = await res.json();
+        const data: BakeStatus = await safeFetchJson<BakeStatus>(res, "Bake status check failed.");
         setBakeStatus(data);
         if (data.status === "done" || data.status === "failed") {
           if (pollRef.current) clearInterval(pollRef.current);
@@ -374,8 +382,7 @@ function DesignWizard() {
           comments,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Submit failed.");
+      const data = await safeFetchJson(res, "Submit failed.");
       setSavedRequest(data.request);
       setStep("done");
     } catch (err) {
@@ -409,8 +416,7 @@ function DesignWizard() {
           sku: chosen?.style.parentSku || knownStyleNumber.trim() || undefined,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Artwork extraction failed.");
+      const data = await safeFetchJson(res, "Artwork extraction failed.");
       setArtworkIntelligence(data.intelligence);
       setArtworkPackage(data.package);
       setStep("submit");

@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ArtworkColor, ArtworkElement, ArtworkIntelligence, ArtworkView } from "./types";
 
-const MODEL_ID = "gemini-3.6-flash";
+const MODEL_ID = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const ALLOWED_VIEWS = new Set<ArtworkView>(["front", "back", "left", "right"]);
 const ALLOWED_TYPES = new Set<ArtworkElement["type"]>([
   "logo",

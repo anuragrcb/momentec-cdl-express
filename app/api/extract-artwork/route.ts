@@ -18,19 +18,45 @@ export const maxDuration = 300;
 
 const SLOTS: ArtworkView[] = ["front", "back", "left", "right"];
 
-async function assetFromUrl(view: ArtworkView, url: string): Promise<{ sessionId: string; buffer: Buffer; mimeType: string }> {
-  const match = url.match(
+async function assetFromUrl(view: ArtworkView, rawUrl: string): Promise<{ sessionId: string; buffer: Buffer; mimeType: string }> {
+  let cleanPath = rawUrl;
+  try {
+    const parsed = new URL(rawUrl, "http://localhost");
+    cleanPath = parsed.pathname;
+  } catch {}
+
+  const match = cleanPath.match(
     new RegExp(`^/api/uploads/([a-zA-Z0-9_-]+)/(${view}(?:-prepared|-generated)?\\.(png|jpg|jpeg|webp))$`),
   );
-  if (!match) throw new Error(`${view} artwork must be an asset returned by the upload pipeline.`);
-  const [, sessionId, filename, extension] = match;
-  const file = await readUpload(sessionId, filename);
-  if (!file) throw new Error(`${view} artwork is no longer available.`);
-  return {
-    sessionId,
-    buffer: file.buffer,
-    mimeType: file.contentType || (extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg"),
-  };
+  if (match) {
+    const [, sessionId, filename, extension] = match;
+    const file = await readUpload(sessionId, filename);
+    if (!file) throw new Error(`${view} artwork is no longer available.`);
+    return {
+      sessionId,
+      buffer: file.buffer,
+      mimeType: file.contentType || (extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg"),
+    };
+  }
+
+  // Fallback pattern matching
+  const parts = cleanPath.split("/").filter(Boolean);
+  const uploadsIdx = parts.indexOf("uploads");
+  if (uploadsIdx !== -1 && parts.length >= uploadsIdx + 3) {
+    const sessionId = parts[uploadsIdx + 1];
+    const filename = parts[uploadsIdx + 2];
+    const file = await readUpload(sessionId, filename);
+    if (file) {
+      const ext = filename.split(".").pop()?.toLowerCase();
+      return {
+        sessionId,
+        buffer: file.buffer,
+        mimeType: file.contentType || (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg"),
+      };
+    }
+  }
+
+  throw new Error(`${view} artwork must be an asset returned by the upload pipeline.`);
 }
 
 function sourceAsset(region: ArtworkRegion): SourceArtworkAsset {
