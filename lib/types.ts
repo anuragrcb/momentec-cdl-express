@@ -24,6 +24,16 @@ export interface PreparedArtwork {
 
 export type ArtworkView = "front" | "back" | "left" | "right";
 
+/** Physical garment signals used to select a manufacturer model. These are
+ * deliberately separate from printed artwork, team branding and colors. */
+export interface GarmentConstruction {
+  sleeveLength: "short" | "long" | "sleeveless" | "unknown";
+  neckline: "crew" | "v-neck" | "collared" | "hooded" | "unknown";
+  sleeveConstruction: "set-in" | "raglan" | "unknown";
+  audience: "adult" | "youth" | "ladies" | "girls" | "unknown";
+  frontClosure: "pullover" | "full-button" | "partial-button" | "zip" | "unknown";
+}
+
 export interface NormalizedArtworkBox {
   /** Left edge as a fraction of the source image width. */
   x: number;
@@ -78,6 +88,9 @@ export interface ArtworkViewRead {
 export interface ArtworkAnalysis {
   sport: string;
   garmentType: string;
+  /** Visible construction signals used for physical-style matching. These
+   *  describe the garment silhouette, never the printed artwork. */
+  construction?: GarmentConstruction;
   /** Whether the customer uploaded a garment-shaped mockup that can be
    * projected directly, or flat artwork that must first be painted onto the
    * selected style's model silhouette. */
@@ -197,6 +210,9 @@ export interface CatalogueStyle {
   renderable: boolean;
   renderBytes: number;
   renderSize: string;
+  /** Verified physical construction metadata. New manufacturer styles should
+   * provide this through catalogue configuration instead of code branches. */
+  construction?: GarmentConstruction;
 }
 
 /** The 4 style numbers that ship with a real .glb in assets/meshes. */
@@ -237,12 +253,32 @@ export function hasAugustaLiveGlb(sku: string): sku is AugustaLiveGlbSku {
   return (AUGUSTA_LIVE_GLB_SKUS as readonly string[]).includes(sku);
 }
 
+/** Manufacturer-hosted assets that have been checked individually but are
+ *  intentionally streamed through our allow-listed API instead of copied
+ *  into the repository. */
+export const AUGUSTA_REMOTE_GLB_SKUS = ["228180"] as const;
+export type AugustaRemoteGlbSku = (typeof AUGUSTA_REMOTE_GLB_SKUS)[number];
+
+export function hasAugustaRemoteGlb(sku: string): sku is AugustaRemoteGlbSku {
+  return (AUGUSTA_REMOTE_GLB_SKUS as readonly string[]).includes(sku);
+}
+
 /** One scored candidate returned by POST /api/match-style. */
 export interface StyleMatch {
   style: CatalogueStyle;
   score: number;
   reasons: string[];
   has3dPreview: boolean;
+}
+
+/** Server decision accompanying ranked candidates. Auto-selection is allowed
+ * only when the best verified 3D style has a decisive score margin. */
+export interface StyleRecommendation {
+  sku: string | null;
+  confidence: "high" | "medium" | "low";
+  autoSelected: boolean;
+  scoreMargin: number;
+  reason: string;
 }
 
 /**

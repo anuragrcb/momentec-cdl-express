@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { hasAugustaLiveGlb } from "@/lib/types";
+import { hasAugustaLiveGlb, hasAugustaRemoteGlb } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+const REMOTE_ASSET_ORIGINS = {
+  model: "https://static.momentecbrands.com/3D-Sublimation",
+  cuts: "https://d31q5t9naund0c.cloudfront.net/onebuilder/svgfilesstage-pim2",
+} as const;
 
 const CONTENT_TYPES: Record<string, string> = {
   glb: "model/gltf-binary",
@@ -46,6 +51,30 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ sku: s
     } catch {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
+  }
+
+  if (hasAugustaRemoteGlb(sku)) {
+    const remoteUrl = file === `${sku}.glb`
+      ? `${REMOTE_ASSET_ORIGINS.model}/${sku}/${sku}.glb`
+      : file === `${sku}-NormalMap.png`
+        ? `${REMOTE_ASSET_ORIGINS.model}/${sku}/${sku}-NormalMap.png`
+        : file === "artwork.svg"
+          ? `${REMOTE_ASSET_ORIGINS.cuts}/prod-${sku}-decorations.svg`
+          : null;
+    if (!remoteUrl) return NextResponse.json({ error: "Invalid verified remote asset filename." }, { status: 400 });
+
+    const response = await fetch(remoteUrl, { cache: "force-cache" });
+    if (!response.ok || !response.body) {
+      return NextResponse.json({ error: `Manufacturer asset unavailable (${response.status}).` }, { status: 502 });
+    }
+    const ext = file.split(".").pop()!;
+    return new NextResponse(response.body, {
+      status: 200,
+      headers: {
+        "Content-Type": CONTENT_TYPES[ext] || response.headers.get("content-type") || "application/octet-stream",
+        "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000",
+      },
+    });
   }
 
   if (!hasAugustaLiveGlb(sku)) {

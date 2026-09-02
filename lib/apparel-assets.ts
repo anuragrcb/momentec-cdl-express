@@ -1,4 +1,4 @@
-import { hasAugustaLiveGlb, hasMesh } from "./types";
+import { hasAugustaRemoteGlb } from "./types";
 
 export type ApparelPreviewMode =
   | "server-baked"
@@ -18,6 +18,11 @@ export interface ApparelAssetDescriptor {
   supportsCustomerViews: readonly ("front" | "back" | "left" | "right")[];
   mappingStatus: "verified" | "needs-style-validation";
   mappingVersion?: string;
+  /** Sizes exposed by the proof journey. This is catalogue/adapter metadata,
+   * not a UI hard-code. */
+  proofSizes?: readonly string[];
+  /** The production SVG contains groups named Garment_x5F_{size}. */
+  cutPieceSvgUsesSizeGroups?: boolean;
   sizeModelUrls?: Readonly<Record<string, string>>;
   previewSvgUrl?: string;
   logicalParts?: readonly string[];
@@ -26,8 +31,6 @@ export interface ApparelAssetDescriptor {
 }
 
 function liveDescriptor(sku: string): ApparelAssetDescriptor {
-  const browserMaterial = hasAugustaLiveGlb(sku);
-  const serverBaked = hasMesh(sku);
   const previewMode: ApparelPreviewMode = "browser-mapped";
 
   return {
@@ -56,6 +59,20 @@ export const APPAREL_ASSETS: Record<string, ApparelAssetDescriptor> = Object.fro
   ]),
 );
 
+// 228180 is the verified adult, short-sleeve, set-in training tee. The
+// official manufacturer assets are allow-listed and streamed by
+// /api/augusta-live rather than committing third-party binaries to this repo.
+if (hasAugustaRemoteGlb("228180")) {
+  APPAREL_ASSETS["228180"] = {
+    ...liveDescriptor("228180"),
+    cutPieceSvgUrl: "/api/augusta-live/228180/artwork.svg",
+    mappingVersion: "228180-official-main-reverse-v1",
+    logicalParts: ["bk", "frt", "lslv", "rslv", "collar"],
+    proofSizes: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"],
+    cutPieceSvgUsesSizeGroups: true,
+  };
+}
+
 APPAREL_ASSETS.J180A = {
   sku: "J180A",
   family: "apparel",
@@ -73,6 +90,8 @@ APPAREL_ASSETS.J180A = {
     "3XL": "/api/augusta-live/J180A/J180A_3XL.glb",
     "4XL": "/api/augusta-live/J180A/J180A_4XL.glb",
   },
+  proofSizes: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"],
+  cutPieceSvgUsesSizeGroups: true,
   logicalParts: ["back", "lfront", "rfront", "lsleeve", "rsleeve", "collar", "lplacket", "rplacket"],
   placementLocations: ["BG", "BK", "BL", "BR", "BT", "JH", "LC", "LF", "LG", "LW", "MR", "MS", "RC", "RF", "UB", "UF", "UG", "UL", "UN", "UR", "US"],
   supportsGeneratedMissingViews: false,
@@ -88,15 +107,13 @@ export function getApparelAssetDescriptor(sku: string): ApparelAssetDescriptor {
   return {
     sku,
     family: "apparel",
-    previewMode: "browser-mapped",
-    modelUrl: "/api/augusta-live/228108/228108.glb",
-    normalMapUrl: "/api/augusta-live/228108/228108-NormalMap.png",
-    supportsGeneratedMissingViews: true,
-    supportsCustomerViews: ["front", "back", "left", "right"],
-    mappingStatus: "verified",
+    previewMode: "unavailable",
+    supportsGeneratedMissingViews: false,
+    supportsCustomerViews: [],
+    mappingStatus: "needs-style-validation",
   };
 }
 
 export function hasApparel3dPreview(sku: string): boolean {
-  return true;
+  return getApparelAssetDescriptor(sku).previewMode !== "unavailable";
 }

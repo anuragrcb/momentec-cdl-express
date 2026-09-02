@@ -1039,6 +1039,80 @@ button {
   font-weight: 700;
 }
 
+.match-row.recommended {
+  position: relative;
+  border-color: #0f8a8c;
+  box-shadow: inset 5px 0 0 #0f8a8c;
+}
+.match-recommended-label {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 7px;
+  padding: 5px 8px;
+  color: #00636b;
+  background: #e5f7f5;
+  border-radius: 999px;
+  font: 800 9px/1 var(--font-display);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.match-decision-note {
+  margin-top: 16px;
+  padding: 15px 17px;
+  background: #f4fbfa;
+  border: 1px solid #b8e4df;
+  color: #244442;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.manufacturer-cuts {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.manufacturer-cuts > summary {
+  min-height: 76px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  cursor: pointer;
+  list-style: none;
+  background: #f7f7f6;
+}
+.manufacturer-cuts > summary::-webkit-details-marker { display: none; }
+.manufacturer-cuts > summary small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent);
+  font: 800 9px/1 var(--font-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.manufacturer-cuts > summary strong { font: 800 14px/1.2 var(--font-display); text-transform: uppercase; }
+.manufacturer-cuts > summary em { color: #13724d; font-size: 11px; font-style: normal; font-weight: 800; text-transform: uppercase; }
+.manufacturer-cuts-body {
+  height: min(62vh, 620px);
+  min-height: 380px;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  border-top: 1px solid var(--line);
+}
+.manufacturer-cuts-body img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.manufacturer-cuts footer {
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+.manufacturer-cuts footer a { color: var(--ink); font-weight: 800; }
+
 
 /* --- studio footer -------------------------------------------------------
    The page previously ended on whitespace. This bookends it against the black
@@ -1248,4 +1322,3 @@ button {
   color: #ffd700;
   transform: translateY(-1px);
 }
-

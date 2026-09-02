@@ -5,9 +5,11 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { Wordmark } from "@/components/Wordmark";
-import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
+import { ManufacturerSvgCuts } from "@/components/ManufacturerSvgCuts";
+import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, StyleRecommendation, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
 import { getApparelAssetDescriptor } from "@/lib/apparel-assets";
 import { compressImageForUpload, rotateImageFile } from "@/lib/client-image";
+import { normalizeStyleNumber } from "@/lib/style-identity";
 
 const ThreeViewer = dynamic(() => import("@/components/ThreeViewer").then((m) => m.ThreeViewer), {
   ssr: false,
@@ -17,6 +19,11 @@ const J180AProof = dynamic(() => import("@/components/J180AProof").then((m) => m
   ssr: false,
   loading: () => <div className="viewer-status"><strong>Loading the manufacturer-panel renderer…</strong></div>,
 });
+
+const AugustaMaterialBake = dynamic(
+  () => import("@/components/AugustaMaterialBake").then((m) => m.AugustaMaterialBake),
+  { ssr: false },
+);
 
 type Step = "upload" | "analyze" | "match" | "preview" | "submit" | "done";
 const STEP_ORDER: Exclude<Step, "done">[] = ["upload", "analyze", "match", "preview", "submit"];
@@ -108,6 +115,7 @@ function DesignWizard() {
   const [analysis, setAnalysis] = useState<ArtworkAnalysis | null>(null);
   const [matches, setMatches] = useState<StyleMatch[]>([]);
   const [chosen, setChosen] = useState<StyleMatch | null>(null);
+  const [recommendation, setRecommendation] = useState<StyleRecommendation | null>(null);
   const [bakeJobId, setBakeJobId] = useState<string | null>(null);
   const [bakeStatus, setBakeStatus] = useState<BakeStatus | null>(null);
   const [generatedViews, setGeneratedViews] = useState<Slot[]>([]);
@@ -126,12 +134,12 @@ function DesignWizard() {
 
   const stepIndex = step === "done" ? STEP_ORDER.length : STEP_ORDER.indexOf(step);
   const chosenAsset = chosen ? getApparelAssetDescriptor(chosen.style.parentSku) : null;
+  const proofSizes = chosenAsset?.proofSizes ?? Object.keys(chosenAsset?.sizeModelUrls ?? {});
   const canApprovePreview = Boolean(
     (chosenAsset?.previewMode === "browser-mapped" && mappedProofReady) ||
     (chosenAsset?.previewMode === "server-baked" &&
       ((bakeStatus?.status === "done" && bakeStatus.glbUrl && ["good", "usable"].includes(bakeStatus.stats?.verdict ?? "")) ||
-      bakeStatus?.status === "failed")) ||
-    chosenAsset?.previewMode === "unavailable",
+      bakeStatus?.status === "failed")),
   );
 
   const onPickFile = async (slot: Slot, rawFile: File | null) => {
@@ -300,12 +308,15 @@ function DesignWizard() {
       });
       const data = await safeFetchJson(res, "Matching failed.");
       setMatches(data.matches);
-      const enteredSku = knownStyleNumber.trim();
+      const decision = (data.recommendation ?? null) as StyleRecommendation | null;
+      setRecommendation(decision);
+      const enteredSku = data.normalizedKnownStyleNumber as string | null;
       // A validated customer-entered SKU is the default physical model. The
       // customer may deliberately choose another result, but the screen makes
       // that departure explicit rather than silently rendering a different
       // hockey cut (for example, 228150 instead of 228108).
-      setChosen(enteredSku ? data.matches.find((match: StyleMatch) => match.style.parentSku === enteredSku) ?? null : null);
+      const selectedSku = enteredSku || (decision?.autoSelected ? decision.sku : null);
+      setChosen(selectedSku ? data.matches.find((match: StyleMatch) => match.style.parentSku === selectedSku) ?? null : null);
       setStep("match");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -321,7 +332,9 @@ function DesignWizard() {
     setGeneratedViews([]);
     setMappedProofReady(false);
     setMappedProofWarning(null);
-    setProofSize("L");
+    const asset = getApparelAssetDescriptor(m.style.parentSku);
+    const sizes = asset.proofSizes ?? Object.keys(asset.sizeModelUrls ?? {});
+    setProofSize(sizes.includes("L") ? "L" : sizes[0] ?? "L");
   };
 
   const handleMatchContinue = useCallback(async () => {
@@ -608,14 +621,10 @@ function DesignWizard() {
           <div className="actions-row" style={{ justifyContent: "flex-end" }}>
             <button
               className="btn btn-primary"
-              disabled={busy || !images.front || missingSlots.length > 0}
+              disabled={busy || !images.front}
               onClick={handleUploadContinue}
             >
-              {busy
-                ? "Analyzing…"
-                : missingSlots.length > 0
-                  ? `Add ${missingSlots.join(", ")} to continue`
-                  : "Analyze My Design"}
+              {busy ? "Analyzing…" : "Analyze My Design"}
             </button>
           </div>
         </div>
@@ -658,6 +667,91 @@ function DesignWizard() {
                 <option value="garment-mockup">Garment mockup / jersey-shaped artwork</option>
                 <option value="flat-artwork">Flat artwork, panel layout, logo, or pattern</option>
                 <option value="unknown">Not sure — use the image read</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label>Sleeve length</label>
+              <select
+                value={analysis.construction?.sleeveLength ?? "unknown"}
+                onChange={(e) => setAnalysis({
+                  ...analysis,
+                  construction: {
+                    sleeveLength: e.target.value as NonNullable<ArtworkAnalysis["construction"]>["sleeveLength"],
+                    neckline: analysis.construction?.neckline ?? "unknown",
+                    sleeveConstruction: analysis.construction?.sleeveConstruction ?? "unknown",
+                    audience: analysis.construction?.audience ?? "unknown",
+                    frontClosure: analysis.construction?.frontClosure ?? "unknown",
+                  },
+                })}
+              >
+                <option value="short">Short sleeve</option>
+                <option value="long">Long sleeve</option>
+                <option value="sleeveless">Sleeveless</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label>Neckline</label>
+              <select
+                value={analysis.construction?.neckline ?? "unknown"}
+                onChange={(e) => setAnalysis({
+                  ...analysis,
+                  construction: {
+                    sleeveLength: analysis.construction?.sleeveLength ?? "unknown",
+                    neckline: e.target.value as NonNullable<ArtworkAnalysis["construction"]>["neckline"],
+                    sleeveConstruction: analysis.construction?.sleeveConstruction ?? "unknown",
+                    audience: analysis.construction?.audience ?? "unknown",
+                    frontClosure: analysis.construction?.frontClosure ?? "unknown",
+                  },
+                })}
+              >
+                <option value="crew">Crew neck</option>
+                <option value="v-neck">V-neck</option>
+                <option value="collared">Collared</option>
+                <option value="hooded">Hooded</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label>Sleeve construction</label>
+              <select
+                value={analysis.construction?.sleeveConstruction ?? "unknown"}
+                onChange={(e) => setAnalysis({
+                  ...analysis,
+                  construction: {
+                    sleeveLength: analysis.construction?.sleeveLength ?? "unknown",
+                    neckline: analysis.construction?.neckline ?? "unknown",
+                    sleeveConstruction: e.target.value as NonNullable<ArtworkAnalysis["construction"]>["sleeveConstruction"],
+                    audience: analysis.construction?.audience ?? "unknown",
+                    frontClosure: analysis.construction?.frontClosure ?? "unknown",
+                  },
+                })}
+              >
+                <option value="set-in">Set-in sleeve</option>
+                <option value="raglan">Raglan sleeve</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label>Front closure</label>
+              <select
+                value={analysis.construction?.frontClosure ?? "unknown"}
+                onChange={(e) => setAnalysis({
+                  ...analysis,
+                  construction: {
+                    sleeveLength: analysis.construction?.sleeveLength ?? "unknown",
+                    neckline: analysis.construction?.neckline ?? "unknown",
+                    sleeveConstruction: analysis.construction?.sleeveConstruction ?? "unknown",
+                    audience: analysis.construction?.audience ?? "unknown",
+                    frontClosure: e.target.value as NonNullable<ArtworkAnalysis["construction"]>["frontClosure"],
+                  },
+                })}
+              >
+                <option value="pullover">Pullover / no opening</option>
+                <option value="full-button">Full-button front</option>
+                <option value="partial-button">Short button placket</option>
+                <option value="zip">Zipper</option>
+                <option value="unknown">Unknown</option>
               </select>
             </div>
           </div>
@@ -787,7 +881,7 @@ function DesignWizard() {
             {matches.map((m) => (
               <div
                 key={m.style.parentSku}
-                className={`match-row ${chosen?.style.parentSku === m.style.parentSku ? "selected" : ""}`}
+                className={`match-row ${chosen?.style.parentSku === m.style.parentSku ? "selected" : ""} ${recommendation?.sku === m.style.parentSku ? "recommended" : ""}`}
                 onClick={() => handlePickMatch(m)}
               >
                 <div className="match-thumb">
@@ -799,6 +893,11 @@ function DesignWizard() {
                   )}
                 </div>
                 <div className="match-body">
+                  {recommendation?.sku === m.style.parentSku && (
+                    <span className="match-recommended-label">
+                      {recommendation.autoSelected ? "Selected from uploaded garment" : "Best construction match"}
+                    </span>
+                  )}
                   <div className="name">{m.style.name}</div>
                   <div className="meta">
                     MSRP ${parseFloat(m.style.msrp).toFixed(2)}
@@ -814,7 +913,14 @@ function DesignWizard() {
             {matches.length === 0 && <p className="sub">No matches found — try adjusting the read above.</p>}
           </div>
 
-          {knownStyleNumber.trim() && chosen && chosen.style.parentSku !== knownStyleNumber.trim() && (
+          {recommendation && (
+            <div className="match-decision-note">
+              <strong>{recommendation.confidence === "high" ? "High-confidence garment match." : recommendation.confidence === "medium" ? "Please confirm the garment match." : "Manual garment selection required."}</strong>{" "}
+              {recommendation.reason}
+            </div>
+          )}
+
+          {knownStyleNumber.trim() && chosen && chosen.style.parentSku !== normalizeStyleNumber(knownStyleNumber) && (
             <div className="viewer-status" style={{ marginTop: 16, background: "#3a2a12", border: "1px solid #7a5a1e" }}>
               <strong>Selected model differs from the entered style number.</strong>
               <span>
@@ -835,7 +941,7 @@ function DesignWizard() {
 
       {step === "preview" && chosen && (
         <>
-          {chosenAsset?.previewMode === "browser-mapped" && chosenAsset.sizeModelUrls && (
+          {chosenAsset?.previewMode === "browser-mapped" && proofSizes.length > 0 && (
             <section className="proof-size-bar" aria-labelledby="proof-size-title">
               <div>
                 <span className="proof-size-kicker">Garment size</span>
@@ -851,7 +957,7 @@ function DesignWizard() {
                     setProofSize(event.target.value);
                   }}
                 >
-                  {Object.keys(chosenAsset.sizeModelUrls).map((size) => (
+                  {proofSizes.map((size) => (
                     <option key={size} value={size}>{size}</option>
                   ))}
                 </select>
@@ -882,37 +988,65 @@ function DesignWizard() {
                 onWarning={setMappedProofWarning}
               />
               {mappedProofWarning && (
-                <div className="viewer-status" style={{ marginTop: 12, background: "#3a2a12", border: "1px solid #7a5a1e" }}>
+                <div className="viewer-status" style={{ marginTop: 12, background: "#3a2a12", border: "1px solid #7a5a1e", color: "#fff" }}>
                   <strong>Proof-quality notice</strong>
                   <span>{mappedProofWarning}</span>
                 </div>
               )}
             </div>
+          ) : chosenAsset?.previewMode === "browser-mapped" && images.front ? (
+            <div className="proof-viewer-wrap">
+              <div className="viewer-wrap">
+                <AugustaMaterialBake
+                  sku={chosen.style.parentSku}
+                  frontImageUrl={images.front.savedUrl || images.front.url}
+                  backImageUrl={!images.back?.generated ? images.back?.savedUrl || images.back?.url : undefined}
+                  leftImageUrl={!images.left?.generated ? images.left?.savedUrl || images.left?.url : undefined}
+                  rightImageUrl={!images.right?.generated ? images.right?.savedUrl || images.right?.url : undefined}
+                  onReady={setMappedProofReady}
+                  onWarning={setMappedProofWarning}
+                />
+              </div>
+              <div className="viewer-status" style={{ position: "relative", inset: "auto", minHeight: 76 }}>
+                <strong>Verified manufacturer 3D proof</strong>
+                <span>
+                  Your original supplied views are mapped to the official {chosen.style.name} GLB. AI-generated views are not used as production artwork.
+                </span>
+              </div>
+              {mappedProofWarning && (
+                <div className="viewer-status" style={{ position: "relative", inset: "auto", minHeight: 76, background: "#3a2a12", border: "1px solid #7a5a1e", color: "#fff" }}>
+                  <strong>Proof-quality notice</strong>
+                  <span>{mappedProofWarning}</span>
+                </div>
+              )}
+            </div>
+          ) : chosenAsset?.previewMode === "server-baked" && bakeStatus?.status === "done" && bakeStatus.glbUrl ? (
+            <div className="viewer-wrap">
+              <ThreeViewer glbUrl={bakeStatus.glbUrl} />
+            </div>
           ) : (
             <div className="viewer-wrap">
-              <ThreeViewer
-                glbUrl={
-                  bakeStatus?.status === "done" && bakeStatus.glbUrl
-                    ? bakeStatus.glbUrl
-                    : chosenAsset?.modelUrl || `/api/augusta-live/${chosen.style.parentSku}/${chosen.style.parentSku}.glb`
-                }
-                frontImageUrl={images.front?.savedUrl || images.front?.url}
-                backImageUrl={images.back?.savedUrl || images.back?.url}
-                leftImageUrl={images.left?.savedUrl || images.left?.url}
-                rightImageUrl={images.right?.savedUrl || images.right?.url}
-              />
-              <div className="viewer-status" style={{ marginTop: 8 }}>
-                <strong>Interactive 3D Sublimation Proof</strong>
+              <div className="viewer-status">
+                <strong>No verified 3D adapter exists for this style yet.</strong>
                 <span>
-                  Your uploaded front and back artwork have been applied to the verified {chosen.style.name} 3D model. Orbit 360° to review seam placement.
+                  We will not substitute a different garment model. Return to Style and choose a result marked “3D preview available,” or continue after the manufacturer assets are verified.
                 </span>
               </div>
             </div>
           )}
 
+          {chosenAsset?.cutPieceSvgUrl && chosenAsset.cutPieceSvgUsesSizeGroups && (
+            <ManufacturerSvgCuts
+              svgUrl={chosenAsset.cutPieceSvgUrl}
+              size={proofSize}
+              styleName={chosen.style.name}
+              expanded={chosen.style.parentSku === "228180"}
+            />
+          )}
+
           <div className="actions-row">
             <button className="btn btn-secondary" onClick={() => setStep("match")}>Back</button>
-            <button className="btn btn-primary" disabled={busy} onClick={handlePreviewApproval}>
+            <button className="btn btn-primary" disabled={busy || !canApprovePreview} onClick={handlePreviewApproval}>
               {busy ? "Preparing artwork package…" : "Prepare artwork package"}
             </button>
           </div>

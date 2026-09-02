@@ -13,6 +13,13 @@ elements and their locations. Return ONLY strict JSON matching this exact shape,
 {
   "sport": string,           // e.g. "Hockey", "Baseball", "Soccer", "Football", "Basketball" - your best guess, "" if unclear
   "garmentType": string,     // e.g. "Jersey", "Pullover", "Polo", "Tee" - your best guess, "" if unclear
+  "construction": {
+    "sleeveLength": "short" | "long" | "sleeveless" | "unknown",
+    "neckline": "crew" | "v-neck" | "collared" | "hooded" | "unknown",
+    "sleeveConstruction": "set-in" | "raglan" | "unknown",
+    "audience": "adult" | "youth" | "ladies" | "girls" | "unknown",
+    "frontClosure": "pullover" | "full-button" | "partial-button" | "zip" | "unknown"
+  },                          // visible physical construction only; do not infer from the printed design
   "artworkKind": "garment-mockup" | "flat-artwork" | "unknown", // mockup = image already shaped like a garment; flat-artwork = panel, graphic, or pattern to fit to a selected garment model
   "colors": [ { "name": string, "hex": string } ],  // 2-5 dominant colors actually used in the design
   "hasLogo": boolean,        // does the design include a crest/logo/emblem
@@ -37,12 +44,16 @@ elements and their locations. Return ONLY strict JSON matching this exact shape,
   "summary": string          // one plain sentence describing the design for a human reviewer
 }
 
+For construction.frontClosure, inspect the center-front garment construction itself: a continuous unbroken
+front is "pullover"; buttons running substantially down the torso are "full-button"; a short neck placket is
+"partial-button"; a visible zipper is "zip". Do not infer the closure from the printed artwork.
+
 For each region, x/y/width/height are normalized to the labelled source image from 0 to 1, with x/y at the
 top-left. Use tight boxes around the visible artwork. Detect discrete logos, wordmarks, player names, player
 numbers, and sleeve marks separately. Include major continuous pattern and trim regions when they convey a
 placement rule, but do not create dozens of tiny fragments. Keep at most 24 regions across all images.
 Be conservative: if you cannot tell the sport or garment type, use "". Do not invent text, a team name,
-number, unseen back art, or hidden sleeve content. Respond with JSON only.`;
+number, unseen back art, hidden sleeve content, or an audience that is not visually supportable. Respond with JSON only.`;
 
 /**
  * Appended only when the matched style publishes real decoration zones.
@@ -69,6 +80,13 @@ function fallbackAnalysis(summary: string): ArtworkAnalysis {
   return {
     sport: "",
     garmentType: "",
+    construction: {
+      sleeveLength: "unknown",
+      neckline: "unknown",
+      sleeveConstruction: "unknown",
+      audience: "unknown",
+      frontClosure: "unknown",
+    },
     artworkKind: "unknown",
     colors: [],
     hasLogo: false,
@@ -165,9 +183,21 @@ export async function analyzeArtwork(
   const text = result.response.text();
   try {
     const parsed = JSON.parse(stripFences(text));
+    const rawConstruction = typeof parsed.construction === "object" && parsed.construction !== null
+      ? parsed.construction as Record<string, unknown>
+      : {};
+    const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+      typeof value === "string" && allowed.includes(value as T) ? value as T : fallback;
     const analysis: ArtworkAnalysis = {
       sport: typeof parsed.sport === "string" ? parsed.sport : "",
       garmentType: typeof parsed.garmentType === "string" ? parsed.garmentType : "",
+      construction: {
+        sleeveLength: enumValue(rawConstruction.sleeveLength, ["short", "long", "sleeveless", "unknown"] as const, "unknown"),
+        neckline: enumValue(rawConstruction.neckline, ["crew", "v-neck", "collared", "hooded", "unknown"] as const, "unknown"),
+        sleeveConstruction: enumValue(rawConstruction.sleeveConstruction, ["set-in", "raglan", "unknown"] as const, "unknown"),
+        audience: enumValue(rawConstruction.audience, ["adult", "youth", "ladies", "girls", "unknown"] as const, "unknown"),
+        frontClosure: enumValue(rawConstruction.frontClosure, ["pullover", "full-button", "partial-button", "zip", "unknown"] as const, "unknown"),
+      },
       artworkKind: parsed.artworkKind === "garment-mockup" || parsed.artworkKind === "flat-artwork"
         ? parsed.artworkKind
         : "unknown",

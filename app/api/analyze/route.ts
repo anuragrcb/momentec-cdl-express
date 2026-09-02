@@ -4,6 +4,7 @@ import { J180A_ZONES } from "@/lib/j180a-zones";
 import type { ArtworkRegion, ArtworkView } from "@/lib/types";
 import sharp from "sharp";
 import { readUpload, saveUpload } from "@/lib/upload-store";
+import { normalizeStyleNumber } from "@/lib/style-identity";
 
 export const runtime = "nodejs";
 const VIEWS: ArtworkView[] = ["front", "back", "left", "right"];
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
       // placement. J180A does (from its own decorations SVG); anything else
       // passes an empty list so regions come back with locationCode: null
       // rather than a code borrowed from a different garment.
-      const sku = typeof body.sku === "string" ? body.sku.trim().toUpperCase() : "";
+      const sku = typeof body.sku === "string" ? normalizeStyleNumber(body.sku) : "";
       const zones = sku === "J180A"
         ? J180A_ZONES.map((z) => ({ code: z.code, meaning: z.meaning, panel: z.panel }))
         : [];

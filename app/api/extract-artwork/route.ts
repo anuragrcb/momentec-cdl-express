@@ -12,6 +12,7 @@ import type {
   SourceArtworkAsset,
   VectorPackageAsset,
 } from "@/lib/types";
+import { normalizeStyleNumber } from "@/lib/style-identity";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "All approved views must belong to the same design session." }, { status: 400 });
     }
 
-    const sku = typeof body.sku === "string" ? body.sku.toUpperCase() : "";
+    const sku = typeof body.sku === "string" ? normalizeStyleNumber(body.sku) : "";
     const zones = sku === "J180A"
       ? J180A_ZONES.map((zone) => ({ code: zone.code, meaning: zone.meaning, panel: zone.panel }))
       : [];

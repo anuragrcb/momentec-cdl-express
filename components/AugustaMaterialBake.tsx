@@ -276,11 +276,279 @@ function pickSleeveIslands(
   return { left, right };
 }
 
+type ArtworkSource = HTMLImageElement | HTMLCanvasElement;
+
+function sourceWidth(image: ArtworkSource): number {
+  return image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+}
+
+function sourceHeight(image: ArtworkSource): number {
+  return image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+}
+
+function cropSource(
+  image: ArtworkSource,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): HTMLCanvasElement {
+  const width = sourceWidth(image), height = sourceHeight(image);
+  const sx = Math.max(0, Math.floor(x0 * width));
+  const sy = Math.max(0, Math.floor(y0 * height));
+  const sw = Math.max(1, Math.min(width - sx, Math.ceil((x1 - x0) * width)));
+  const sh = Math.max(1, Math.min(height - sy, Math.ceil((y1 - y0) * height)));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  canvas.getContext("2d")?.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas;
+}
+
+function removeConnectedEdgeBackground(image: ArtworkSource): HTMLCanvasElement {
+  const width = sourceWidth(image), height = sourceHeight(image);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return canvas;
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, width, height), data = pixels.data;
+  const total = width * height;
+  const corners = [0, width - 1, (height - 1) * width, total - 1];
+  const background = [0, 1, 2].map((channel) => corners.reduce((sum, index) => sum + data[index * 4 + channel], 0) / 4);
+  const seen = new Uint8Array(total), queue = new Int32Array(total);
+  let head = 0, tail = 0;
+  const isBackground = (index: number) => {
+    const offset = index * 4;
+    const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+    const distance = Math.hypot(r - background[0], g - background[1], b - background[2]);
+    const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+    return data[offset + 3] < 24 || (distance < 72 && saturation < 42);
+  };
+  const push = (index: number) => {
+    if (index < 0 || index >= total || seen[index] || !isBackground(index)) return;
+    seen[index] = 1;
+    queue[tail++] = index;
+  };
+  for (let x = 0; x < width; x++) { push(x); push((height - 1) * width + x); }
+  for (let y = 0; y < height; y++) { push(y * width); push(y * width + width - 1); }
+  while (head < tail) {
+    const index = queue[head++], x = index % width, y = Math.floor(index / width);
+    if (x) push(index - 1);
+    if (x < width - 1) push(index + 1);
+    if (y) push(index - width);
+    if (y < height - 1) push(index + width);
+  }
+  for (let index = 0; index < total; index++) if (seen[index]) data[index * 4 + 3] = 0;
+  context.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
+function removeNeutralPhotoSurface(image: ArtworkSource): HTMLCanvasElement {
+  const canvas = removeConnectedEdgeBackground(image);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return canvas;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height), data = pixels.data;
+  for (let index = 0; index < canvas.width * canvas.height; index++) {
+    const offset = index * 4;
+    const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+    const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+    const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    // The supplied customer photos are shot on a mid-grey carpet. Retain
+    // colourful print, near-white fabric and true black artwork; remove only
+    // neutral mid-tones that match the photographic surface.
+    if (saturation < 36 && luma >= 58 && luma <= 205) data[offset + 3] = 0;
+  }
+  context.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
+/** Removes empty alpha margins after background masking. Leaving those rows
+ * in the source rectangle makes object-fit/UV cover logic treat the removed
+ * background as part of the garment, which previously produced a coloured
+ * or carpet-textured band below the physical hem. */
+function trimTransparentBounds(image: ArtworkSource): HTMLCanvasElement {
+  const width = sourceWidth(image), height = sourceHeight(image);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return canvas;
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, width, height);
+  let x0 = width, y0 = height, x1 = -1, y1 = -1;
+  let strongY0 = height, strongY1 = -1;
+  const strongRowThreshold = Math.max(4, Math.round(width * 0.06));
+  for (let y = 0; y < height; y++) {
+    let strongPixels = 0;
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      if (data[offset + 3] < 24) continue;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      // Sublimated fabric and white garment panels remain a strong signal;
+      // the neutral carpet fibres left after edge masking do not. Counting a
+      // percentage of the row, rather than one pixel, also ignores isolated
+      // dark carpet speckles that used to keep the crop open below the hem.
+      if (saturation >= 42 || luma >= 215) strongPixels += 1;
+    }
+    if (strongPixels >= strongRowThreshold) {
+      strongY0 = Math.min(strongY0, y);
+      strongY1 = Math.max(strongY1, y);
+    }
+  }
+  if (x1 < x0 || y1 < y0) return canvas;
+  if (strongY1 > strongY0 && strongY1 - strongY0 >= height * 0.25) {
+    const verticalPadding = Math.max(1, Math.round(height * 0.004));
+    y0 = Math.max(y0, strongY0 - verticalPadding);
+    y1 = Math.min(y1, strongY1 + verticalPadding);
+  }
+  return cropSource(canvas, x0 / width, y0 / height, (x1 + 1) / width, (y1 + 1) / height);
+}
+
+function opaquePixelCount(image: ArtworkSource): number {
+  const width = sourceWidth(image), height = sourceHeight(image);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return 0;
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, width, height);
+  let count = 0;
+  for (let offset = 3; offset < data.length; offset += 4) if (data[offset] >= 24) count += 1;
+  return count;
+}
+
+/** Measures low-saturation mid-tone material along the horizontal edges of a
+ * cropped panel. In customer phone photos this is the carpet/table residue
+ * that becomes a false yoke or hem when stretched across a UV island. */
+function neutralHorizontalEdgeRatio(image: ArtworkSource): number {
+  const width = sourceWidth(image), height = sourceHeight(image);
+  const sampleHeight = Math.max(1, Math.round(height * 0.12));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return 0;
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, width, height);
+  let neutral = 0, visible = 0;
+  for (let y = 0; y < height; y++) {
+    if (y >= sampleHeight && y < height - sampleHeight) continue;
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      if (data[offset + 3] < 24) continue;
+      visible += 1;
+      const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      if (saturation < 38 && luma >= 52 && luma <= 210) neutral += 1;
+    }
+  }
+  return visible ? neutral / visible : 0;
+}
+
+/** Removes residual neutral photo surface from a torso only when the normal
+ * edge-connected crop has demonstrably failed. The retained-pixel guard is
+ * important: a legitimate grey garment with only a small colored logo must
+ * not disappear merely because it resembles a studio background. */
+function cleanTorsoPanel(image: ArtworkSource): HTMLCanvasElement {
+  const baseline = trimTransparentBounds(image);
+  if (neutralHorizontalEdgeRatio(baseline) < 0.28) return baseline;
+
+  const cleaned = trimTransparentBounds(removeNeutralPhotoSurface(baseline));
+  const baselinePixels = opaquePixelCount(baseline);
+  const retainedPixels = opaquePixelCount(cleaned);
+  if (!baselinePixels || retainedPixels / baselinePixels < 0.18) return baseline;
+  return cleaned;
+}
+
+/**
+ * Finds the largest colourful/light-or-dark connected component against the
+ * photo's corner colour, then crops to it. This is deliberately a local,
+ * deterministic crop - it does not invent pixels or trigger a paid AI job.
+ * It removes the carpet/table area that previously became the entire 3D
+ * texture when a customer uploaded a phone photo of a garment laid flat.
+ */
+function cropToGarment(image: HTMLImageElement): ArtworkSource {
+  const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const sample = document.createElement("canvas");
+  sample.width = width;
+  sample.height = height;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return image;
+  context.drawImage(image, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const rgba = (index: number) => [pixels[index * 4], pixels[index * 4 + 1], pixels[index * 4 + 2], pixels[index * 4 + 3]];
+  const cornerIndices = [0, width - 1, (height - 1) * width, width * height - 1];
+  const background = [0, 1, 2].map((channel) => cornerIndices.reduce((sum, index) => sum + rgba(index)[channel], 0) / 4);
+  const backgroundLuma = background[0] * 0.2126 + background[1] * 0.7152 + background[2] * 0.0722;
+  const isForeground = (index: number) => {
+    const [r, g, b, a] = rgba(index);
+    if (a < 24) return false;
+    const distance = Math.hypot(r - background[0], g - background[1], b - background[2]);
+    const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+    const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    return distance > 62 || saturation > 48 || Math.abs(luma - backgroundLuma) > 52;
+  };
+
+  const seen = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let best = { count: 0, x0: width, y0: height, x1: -1, y1: -1 };
+  for (let start = 0; start < seen.length; start++) {
+    if (seen[start] || !isForeground(start)) continue;
+    let head = 0, tail = 0;
+    queue[tail++] = start;
+    seen[start] = 1;
+    const component = { count: 0, x0: width, y0: height, x1: -1, y1: -1 };
+    while (head < tail) {
+      const index = queue[head++], x = index % width, y = Math.floor(index / width);
+      component.count += 1;
+      component.x0 = Math.min(component.x0, x); component.x1 = Math.max(component.x1, x);
+      component.y0 = Math.min(component.y0, y); component.y1 = Math.max(component.y1, y);
+      const neighbours = [index - 1, index + 1, index - width, index + width];
+      for (const next of neighbours) {
+        if (next < 0 || next >= seen.length || seen[next] || !isForeground(next)) continue;
+        const nx = next % width;
+        if (Math.abs(nx - x) > 1) continue;
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    if (component.count > best.count) best = component;
+  }
+
+  if (best.count < width * height * 0.015 || best.x1 <= best.x0 || best.y1 <= best.y0) return image;
+  const paddingX = Math.max(2, Math.round((best.x1 - best.x0) * 0.015));
+  // Do not add vertical photographic padding. The old 2.5% margin was the
+  // exact reason a strip of carpet survived below the detected garment hem
+  // and was then stretched across the bottom of the 3D torso.
+  const paddingY = 0;
+  const x0 = Math.max(0, best.x0 - paddingX) / width;
+  const y0 = Math.max(0, best.y0 - paddingY) / height;
+  const x1 = Math.min(width - 1, best.x1 + paddingX) / width;
+  const y1 = Math.min(height, best.y1 + paddingY + 1) / height;
+  if (x1 - x0 > 0.96 && y1 - y0 > 0.96) return image;
+  // Apply the edge-connected mask while all four corners still represent the
+  // real photographic background. Re-sampling after the tight crop is too
+  // late: its upper corners can already be garment pixels, which corrupts the
+  // background estimate and leaves the lower carpet strip behind.
+  const isolated = removeConnectedEdgeBackground(image);
+  return cropSource(isolated, x0, y0, x1, y1);
+}
+
 /** Samples a rough average/dominant color from an already-loaded image, used
  *  as the fill for sleeve/collar UV regions that don't get the customer's
  *  photo (see buildTorsoScopedTexture). Downsamples to 16x16 first so this
  *  is cheap regardless of the source photo's resolution. */
-function dominantColorCss(image: HTMLImageElement): string {
+function dominantColorCss(image: ArtworkSource): string {
   try {
     const size = 16;
     const c = document.createElement("canvas");
@@ -305,6 +573,48 @@ function dominantColorCss(image: HTMLImageElement): string {
     // safe, sensible fallback rather than failing the whole render.
     return "#808080";
   }
+}
+
+/** Chooses the most frequent saturated colour in a small garment detail.
+ * This is used for rib-knit pieces such as a collar where mapping the whole
+ * rectangular photo crop would incorrectly bring shoulder/body colours into
+ * a part that is manufactured as one solid fabric colour. */
+function dominantMaterialColorCss(image: ArtworkSource): string {
+  const size = 48;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return dominantColorCss(image);
+  context.drawImage(image, 0, 0, size, size);
+  const { data } = context.getImageData(0, 0, size, size);
+  const saturated = new Map<string, number>();
+  const fallback = new Map<string, number>();
+  for (let offset = 0; offset < data.length; offset += 4) {
+    if (data[offset + 3] < 32) continue;
+    const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+    const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+    const bucket = `${Math.floor(r / 16)},${Math.floor(g / 16)},${Math.floor(b / 16)}`;
+    fallback.set(bucket, (fallback.get(bucket) ?? 0) + 1);
+    if (saturation >= 45) saturated.set(bucket, (saturated.get(bucket) ?? 0) + 1);
+  }
+  const source = saturated.size ? saturated : fallback;
+  const winner = [...source.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!winner) return dominantColorCss(image);
+  const [r, g, b] = winner.split(",").map((channel) => Math.min(255, Number(channel) * 16 + 8));
+  return `rgb(${r},${g},${b})`;
+}
+
+function solidColorSource(color: string): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = color;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  return canvas;
 }
 
 /**
@@ -354,10 +664,12 @@ function dominantColorCss(image: HTMLImageElement): string {
  */
 function paintRegion(
   ctx: CanvasRenderingContext2D,
-  photoImage: HTMLImageElement,
+  photoImage: ArtworkSource,
   island: UvIsland | undefined,
   resolution: number,
   rotate180 = false,
+  mirror = true,
+  maxZoom = 1.6,
 ) {
   // Reduce minU/minV into [0,1) via frac() before scaling to pixels, so a
   // raw UDIM-style value like minU=3.6 (see the block comment on
@@ -383,12 +695,11 @@ function paintRegion(
   const boxW = Math.max(1, ((island?.maxU ?? 1) - (island?.minU ?? 0)) * resolution);
   const boxH = Math.max(1, ((island?.maxV ?? 1) - (island?.minV ?? 0)) * resolution);
 
-  const imgW = photoImage.naturalWidth || 1;
-  const imgH = photoImage.naturalHeight || 1;
+  const imgW = sourceWidth(photoImage) || 1;
+  const imgH = sourceHeight(photoImage) || 1;
   const containScale = Math.min(boxW / imgW, boxH / imgH);
   const coverScale = Math.max(boxW / imgW, boxH / imgH);
-  const MAX_ZOOM = 1.6; // cap cover-scale at 1.6x contain-scale - see block comment
-  const scale = Math.min(coverScale, containScale * MAX_ZOOM);
+  const scale = Math.min(coverScale, containScale * maxZoom);
   const drawW = imgW * scale;
   const drawH = imgH * scale;
   const dx = x0 + (boxW - drawW) / 2;
@@ -432,9 +743,13 @@ function paintRegion(
       ctx.beginPath();
       ctx.rect(x0 + ox, y0 + oy, boxW, boxH);
       ctx.clip();
+      ctx.fillStyle = dominantColorCss(photoImage);
+      ctx.fillRect(x0 + ox, y0 + oy, boxW, boxH);
       if (rotate180) {
         ctx.translate(dx + ox, dy + drawH + oy);
         ctx.scale(1, -1);
+      } else if (!mirror) {
+        ctx.translate(dx + ox, dy + oy);
       } else {
         ctx.translate(dx + drawW + ox, dy + oy);
         ctx.scale(-1, 1);
@@ -474,7 +789,7 @@ function paintRegion(
  * "reverse" with the back photo) just means both agree.
  */
 function buildAtlasTexture(
-  regions: { photo: HTMLImageElement; island: UvIsland | undefined; rotate180?: boolean }[],
+  regions: { photo: ArtworkSource; island: UvIsland | undefined; rotate180?: boolean; mirror?: boolean; maxZoom?: number }[],
   resolution = 2048,
 ): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
@@ -486,7 +801,7 @@ function buildAtlasTexture(
   ctx.fillRect(0, 0, resolution, resolution);
 
   for (const region of regions) {
-    paintRegion(ctx, region.photo, region.island, resolution, region.rotate180);
+    paintRegion(ctx, region.photo, region.island, resolution, region.rotate180, region.mirror, region.maxZoom);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -525,10 +840,16 @@ export interface AugustaMaterialBakeProps {
    *  URL of the current camera view - used for verification/export, not
    *  required for the interactive viewer itself. */
   onCapture?: (dataUrl: string) => void;
+  /** Reports whether the verified mesh and material atlas rendered
+   *  successfully. The parent uses this to block approval on a blank or
+   *  partially initialized canvas. */
+  onReady?: (ready: boolean) => void;
   /** Fires if the material-name matching found zero "reverse" materials on
    *  this SKU, or the GLB/texture load failed - surfaced so callers can warn
    *  instead of silently showing an unpainted model. */
   onWarning?: (message: string) => void;
+  /** Optional deterministic inspection angle used by the test harness. */
+  view?: "front" | "back" | "left" | "right";
 }
 
 export function AugustaMaterialBake({
@@ -539,7 +860,9 @@ export function AugustaMaterialBake({
   rightImageUrl,
   useNormalMap = true,
   onCapture,
+  onReady,
   onWarning,
+  view = "front",
 }: AugustaMaterialBakeProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -547,6 +870,8 @@ export function AugustaMaterialBake({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+
+    onReady?.(false);
 
     let disposed = false;
     let frameId = 0;
@@ -644,6 +969,33 @@ export function AugustaMaterialBake({
         if (normalTex) normalTex.colorSpace = THREE.NoColorSpace;
         if (disposed) return;
 
+        const teeProof = sku === "228180";
+        const prepareTeeView = (texture: THREE.Texture | undefined) => {
+          const original = texture?.image as HTMLImageElement | undefined;
+          if (!original) return undefined;
+          const garment = cropToGarment(original);
+          const cleanEdgePanel = (source: ArtworkSource) => trimTransparentBounds(removeNeutralPhotoSurface(source));
+          const collarReference = cleanEdgePanel(cropSource(garment, 0.43, 0.01, 0.57, 0.14));
+          return {
+            // The torso already has an edge-connected background mask from
+            // cropToGarment. Only trim its empty/neutral outer rows here;
+            // applying the stronger neutral filter inside the panel would
+            // erase legitimate black and grey artwork around logos.
+            torso: cleanTorsoPanel(cropSource(garment, 0.18, 0.02, 0.82, 1)),
+            screenLeftSleeve: cleanEdgePanel(cropSource(garment, 0, 0.08, 0.28, 0.42)),
+            screenRightSleeve: cleanEdgePanel(cropSource(garment, 0.72, 0.08, 1, 0.42)),
+            collar: solidColorSource(dominantMaterialColorCss(collarReference)),
+            sideSleeve: cleanEdgePanel(cropSource(garment, 0.08, 0, 0.92, 0.48)),
+          };
+        };
+        const frontPrepared = teeProof ? prepareTeeView(frontTex) : undefined;
+        const backPrepared = teeProof ? prepareTeeView(backTex) : undefined;
+        const leftPrepared = teeProof ? prepareTeeView(leftTex) : undefined;
+        const rightPrepared = teeProof ? prepareTeeView(rightTex) : undefined;
+        if (teeProof && !backPrepared) {
+          onWarning?.("No original back photo was supplied. The front is repeated on the back for preview only; upload the real back before production review.");
+        }
+
         new GLTFLoader().load(
           `/api/augusta-live/${sku}/${sku}.glb`,
           (gltf) => {
@@ -682,7 +1034,8 @@ export function AugustaMaterialBake({
 
                 if (isReverse) {
                   reverseCount += 1;
-                  const backPhoto = (backTex ?? frontTex)?.image as HTMLImageElement | undefined;
+                  const backPhoto = backPrepared?.torso ?? frontPrepared?.torso ??
+                    (backTex ?? frontTex)?.image as ArtworkSource | undefined;
                   let map: THREE.Texture | undefined = backTex ?? frontTex;
                   if (backPhoto) {
                     // "reverse" turned out to be fragmented into UV islands
@@ -699,14 +1052,18 @@ export function AugustaMaterialBake({
                     // surface is typically small/hidden.
                     const islands = computeUvIslands(node.geometry);
                     const torso = pickTorsoIsland(islands, false);
-                    map = buildAtlasTexture([{ photo: backPhoto, island: torso }]);
+                    map = buildAtlasTexture([{
+                      photo: backPhoto,
+                      island: torso,
+                      maxZoom: teeProof ? Number.POSITIVE_INFINITY : undefined,
+                    }]);
                   }
                   const back = new THREE.MeshStandardMaterial({ map, name: originalName });
                   return back;
                 }
 
                 frontCount += 1;
-                const frontPhoto = frontTex?.image as HTMLImageElement | undefined;
+                const frontPhoto = frontPrepared?.torso ?? frontTex?.image as ArtworkSource | undefined;
                 let map: THREE.Texture | undefined = frontTex;
                 if (isMain && frontPhoto) {
                   // "main" isn't always just the front torso - see
@@ -721,15 +1078,17 @@ export function AugustaMaterialBake({
                   const islands = computeUvIslands(node.geometry);
                   const frontTorso = pickTorsoIsland(islands, true);
                   const backTorso = pickTorsoIsland(islands, false);
-                  const backPhoto = (backTex ?? frontTex)?.image as HTMLImageElement | undefined;
-                  const regions: { photo: HTMLImageElement; island: UvIsland | undefined; rotate180?: boolean }[] = [
-                    { photo: frontPhoto, island: frontTorso },
+                  const backPhoto = backPrepared?.torso ?? frontPrepared?.torso ??
+                    (backTex ?? frontTex)?.image as ArtworkSource | undefined;
+                  const regions: { photo: ArtworkSource; island: UvIsland | undefined; rotate180?: boolean; mirror?: boolean; maxZoom?: number }[] = [
+                    { photo: frontPhoto, island: frontTorso, maxZoom: teeProof ? Number.POSITIVE_INFINITY : undefined },
                   ];
                   if (backPhoto && backTorso && backTorso !== frontTorso) {
                     regions.push({
                       photo: backPhoto,
                       island: backTorso,
                       rotate180: AUGUSTA_BACK_ROTATE_180[sku] ?? false,
+                      maxZoom: teeProof ? Number.POSITIVE_INFINITY : undefined,
                     });
                   }
                   // Sleeves: were always a flat dominant-color fill (an
@@ -740,15 +1099,29 @@ export function AugustaMaterialBake({
                   // pickSleeveIslands' comment) whenever a sleeve photo is
                   // available; falls back to the flat fill exactly as before
                   // for any island a photo isn't available for.
-                  const leftPhoto = leftTex?.image as HTMLImageElement | undefined;
-                  const rightPhoto = rightTex?.image as HTMLImageElement | undefined;
+                  const leftPhoto = leftPrepared?.sideSleeve ??
+                    (teeProof ? frontPrepared?.screenLeftSleeve : leftTex?.image as ArtworkSource | undefined);
+                  const rightPhoto = rightPrepared?.sideSleeve ??
+                    (teeProof ? frontPrepared?.screenRightSleeve : rightTex?.image as ArtworkSource | undefined);
+                  let sleeves: { left: UvIsland | undefined; right: UvIsland | undefined } | undefined;
                   if (leftPhoto || rightPhoto) {
-                    const sleeves = pickSleeveIslands(islands, [frontTorso, backTorso]);
+                    sleeves = pickSleeveIslands(islands, [frontTorso, backTorso]);
                     if (leftPhoto && sleeves.left) {
-                      regions.push({ photo: leftPhoto, island: sleeves.left });
+                      regions.push({ photo: leftPhoto, island: sleeves.left, mirror: !teeProof });
                     }
                     if (rightPhoto && sleeves.right) {
-                      regions.push({ photo: rightPhoto, island: sleeves.right });
+                      regions.push({ photo: rightPhoto, island: sleeves.right, mirror: !teeProof });
+                    }
+                  }
+                  if (teeProof && frontPrepared?.collar) {
+                    const used = [frontTorso, backTorso, sleeves?.left, sleeves?.right];
+                    const collarIslands = islands
+                      .filter((island) => !used.includes(island))
+                      .sort((a, b) => b.faceCount - a.faceCount)
+                      .slice(0, 2);
+                    if (collarIslands[0]) regions.push({ photo: frontPrepared.collar, island: collarIslands[0] });
+                    if (collarIslands[1]) {
+                      regions.push({ photo: backPrepared?.collar ?? frontPrepared.collar, island: collarIslands[1] });
                     }
                   }
                   map = buildAtlasTexture(regions);
@@ -787,18 +1160,21 @@ export function AugustaMaterialBake({
             const scaledCenter = center.clone().multiplyScalar(scale);
             model.position.sub(scaledCenter);
             model.position.y += 0.6;
+            model.rotation.y = view === "back" ? Math.PI : view === "left" ? -Math.PI / 2 : view === "right" ? Math.PI / 2 : 0;
             controls.target.set(0, 0.6, 0);
             camera.position.set(0, 0.9, 2.2);
 
             scene.add(model);
             modelReady = true;
             setStatus("ready");
+            onReady?.(true);
           },
           undefined,
           (err) => {
             console.error("Failed to load Augusta-live GLB", err);
             if (!disposed) {
               setStatus("error");
+              onReady?.(false);
               onWarning?.(`Failed to load real GLB for style ${sku}.`);
             }
           },
@@ -807,6 +1183,7 @@ export function AugustaMaterialBake({
         console.error("Failed to load textures for Augusta material bake", err);
         if (!disposed) {
           setStatus("error");
+          onReady?.(false);
           onWarning?.(`Failed to load artwork textures for style ${sku}.`);
         }
       }
@@ -850,7 +1227,7 @@ export function AugustaMaterialBake({
       mount.removeChild(renderer.domElement);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sku, frontImageUrl, backImageUrl, leftImageUrl, rightImageUrl, useNormalMap]);
+  }, [sku, frontImageUrl, backImageUrl, leftImageUrl, rightImageUrl, useNormalMap, view]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>

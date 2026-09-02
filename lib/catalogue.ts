@@ -1,13 +1,39 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ArtworkAnalysis, CatalogueStyle, StyleMatch } from "./types";
+import type { ArtworkAnalysis, CatalogueStyle, GarmentConstruction, StyleMatch } from "./types";
 import { hasApparel3dPreview } from "./apparel-assets";
+import { normalizeStyleNumber } from "./style-identity";
 
 const CATALOGUE_PATH = path.join(process.cwd(), "data", "template-library.json");
 
 let cache: CatalogueStyle[] | null = null;
 
 const VERIFIED_EXTERNAL_STYLES: CatalogueStyle[] = [
+  {
+    parentSku: "228180",
+    name: "FreeStyle Sublimated Turbo Training Tee",
+    division: "Adult",
+    sport: "TEES",
+    garmentType: "TOP",
+    category: "Adult | TEES | TOP | Short Sleeve | Set-In",
+    sizes: ["S", "M", "L", "XL", "2XL", "3XL", "4XL"],
+    coreSizesPresent: true,
+    colorCount: 44,
+    msrp: "35.50",
+    image: "https://service.augustasportswear.com/w2p/api/is/preview-prod-228180-l?fmt=png&wid=600",
+    w2pTemplate: "prod-228180-decorations.svg",
+    w2pUrlBase: "https://d31q5t9naund0c.cloudfront.net/onebuilder/svgfilesstage-pim2/",
+    renderable: true,
+    renderBytes: 257108,
+    renderSize: "Official 3D GLB + S-4XL cut SVG",
+    construction: {
+      sleeveLength: "short",
+      neckline: "crew",
+      sleeveConstruction: "set-in",
+      audience: "adult",
+      frontClosure: "pullover",
+    },
+  },
   {
     parentSku: "J180A",
     name: "FreeStyle Sublimated Full Button Jersey / Tee",
@@ -25,6 +51,13 @@ const VERIFIED_EXTERNAL_STYLES: CatalogueStyle[] = [
     renderable: true,
     renderBytes: 898688,
     renderSize: "S/M/L size-specific GLBs",
+    construction: {
+      sleeveLength: "short",
+      neckline: "v-neck",
+      sleeveConstruction: "set-in",
+      audience: "adult",
+      frontClosure: "full-button",
+    },
   },
   {
     parentSku: "228108",
@@ -105,6 +138,86 @@ function tokenize(s: string): string[] {
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
 }
 
+function styleConstruction(style: CatalogueStyle): GarmentConstruction {
+  if (style.construction) return style.construction;
+  const text = `${style.name} ${style.division} ${style.category}`.toLowerCase();
+  const sleeveLength: GarmentConstruction["sleeveLength"] = text.includes("long sleeve")
+    ? "long"
+    : text.includes("sleeveless") || text.includes("tank")
+      ? "sleeveless"
+      : text.includes("short sleeve")
+        ? "short"
+        : "unknown";
+  const neckline: GarmentConstruction["neckline"] = text.includes("v-neck") || text.includes("v neck")
+    ? "v-neck"
+    : text.includes("crew neck")
+      ? "crew"
+      : text.includes("hood")
+        ? "hooded"
+        : text.includes("polo") || text.includes("collar")
+          ? "collared"
+          : "unknown";
+  const sleeveConstruction: GarmentConstruction["sleeveConstruction"] = text.includes("raglan")
+    ? "raglan"
+    : text.includes("set-in") || text.includes("set in")
+      ? "set-in"
+      : "unknown";
+  const audience: GarmentConstruction["audience"] = text.includes("youth")
+    ? "youth"
+    : text.includes("girls")
+      ? "girls"
+      : text.includes("ladies") || text.includes("women")
+        ? "ladies"
+        : style.division.toLowerCase() === "adult"
+          ? "adult"
+          : "unknown";
+  const frontClosure: GarmentConstruction["frontClosure"] = text.includes("full button") || text.includes("full-button")
+    ? "full-button"
+    : text.includes("quarter button") || text.includes("quarter-button") || text.includes("henley") || text.includes("two button")
+      ? "partial-button"
+      : text.includes("zip")
+        ? "zip"
+        : neckline === "crew" || neckline === "v-neck" || text.includes("tee")
+          ? "pullover"
+          : "unknown";
+  return { sleeveLength, neckline, sleeveConstruction, audience, frontClosure };
+}
+
+function scoreConstruction(analysis: ArtworkAnalysis, style: CatalogueStyle): { score: number; reasons: string[] } {
+  const requested = analysis.construction;
+  if (!requested) return { score: 0, reasons: [] };
+  const actual = styleConstruction(style);
+  const reasons: string[] = [];
+  let score = 0;
+
+  const compare = <T extends string>(
+    label: string,
+    wanted: T | undefined,
+    found: T | undefined,
+    match: number,
+    conflict: number,
+  ) => {
+    if (!wanted || !found || wanted === "unknown" || found === "unknown") return;
+    if (wanted === found) {
+      score += match;
+      reasons.push(`${label} matches (${found})`);
+    } else {
+      score -= conflict;
+      reasons.push(`${label} conflicts (${found})`);
+    }
+  };
+
+  compare("sleeve length", requested.sleeveLength, actual.sleeveLength, 35, 85);
+  compare("neckline", requested.neckline, actual.neckline, 24, 55);
+  compare("sleeve construction", requested.sleeveConstruction, actual.sleeveConstruction, 24, 45);
+  compare("audience", requested.audience, actual.audience, 12, 35);
+  // Front closure is the strongest visible discriminator between the J180A
+  // full-button baseball cut and the 228180 crew-neck pullover. A conflict is
+  // therefore intentionally stronger than generic name/sport similarities.
+  compare("front closure", requested.frontClosure, actual.frontClosure, 50, 120);
+  return { score, reasons };
+}
+
 /**
  * The catalogue's sport/garmentType/category fields are only populated for
  * about a third of the 364 rows (the rest are empty strings) - so scoring
@@ -155,6 +268,10 @@ export function scoreStyle(analysis: ArtworkAnalysis, style: CatalogueStyle): { 
   }
   if (hits > 0) reasons.push(`name overlaps ${hits} keyword${hits > 1 ? "s" : ""} from the artwork read`);
 
+  const construction = scoreConstruction(analysis, style);
+  score += construction.score;
+  reasons.push(...construction.reasons);
+
   // Sublimation tops/jerseys/tees are the standard case for this custom flow
   if (nameTokens.has("jersey") || nameTokens.has("tee") || nameTokens.has("top")) score += 10;
 
@@ -191,5 +308,6 @@ export function matchStyles(analysis: ArtworkAnalysis, limit = 8): StyleMatch[] 
 }
 
 export function findStyleBySku(sku: string): CatalogueStyle | undefined {
-  return loadCatalogue().find((s) => s.parentSku === sku);
+  const normalized = normalizeStyleNumber(sku);
+  return loadCatalogue().find((s) => s.parentSku.toUpperCase() === normalized);
 }
