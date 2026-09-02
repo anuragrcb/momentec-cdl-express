@@ -1322,3 +1322,33 @@ button {
   color: #ffd700;
   transform: translateY(-1px);
 }
+
+.upload-slot.bg-removed {
+  background: #ffffff;
+}
+
+.slot-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 18, 18, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  border-radius: var(--radius);
+}
+
+.slot-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--teal-lite);
+  border-radius: 50%;
+  animation: slot-spin 0.75s linear infinite;
+}
+
+@keyframes slot-spin {
+  to { transform: rotate(360deg); }
+}
+

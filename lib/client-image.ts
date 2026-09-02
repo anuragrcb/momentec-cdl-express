@@ -1,28 +1,116 @@
 /**
- * Client-side image compression and orientation utility for CDL Express.
- *
- * Compresses and downscales user-uploaded camera / high-res photos in the browser
- * before uploading to Vercel serverless functions.
- *
- * Vercel Serverless Functions enforce a strict 4.5 MB request body limit.
- * High-resolution phone photos (5-15MB each) easily exceed this limit when multiple
- * views are uploaded together. Downscaling to a maximum of 2048px (maintaining aspect ratio)
- * and compressing to high-quality JPEG (0.88) reduces file size to ~300KB-700KB per view
- * without losing fidelity for Gemini Vision analysis or 3D texture baking.
+ * Client-side image utilities for CDL Express:
+ * - AI background removal / garment isolation (via @imgly/background-removal isnet_quint8)
+ * - Dimension downscaling and compression (preserving PNG alpha transparency)
+ * - Orientation rotation
  */
 
+import type { Config, ImageSource } from "@imgly/background-removal";
+
+let preloadPromise: Promise<void> | null = null;
+
+/**
+ * Preloads the background removal WASM runtime and quantized neural network
+ * model in the background so inference starts immediately upon file upload.
+ */
+export async function preloadBackgroundRemoval(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!preloadPromise) {
+    preloadPromise = (async () => {
+      try {
+        const { preload } = await import("@imgly/background-removal");
+        await preload({ model: "isnet_quint8" });
+      } catch (e) {
+        console.warn("Background removal preload note:", e);
+      }
+    })();
+  }
+  return preloadPromise;
+}
+
+/**
+ * Pre-downscales large camera photos to 512px before feeding them into the segmentation neural network.
+ * Reduces computation by 75% for sub-second processing time while keeping crisp contours.
+ */
+async function downscaleForSegmentation(source: File | Blob, maxDim = 512): Promise<File | Blob> {
+  if (typeof window === "undefined") return source;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(source);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width <= maxDim && height <= maxDim) {
+        resolve(source);
+        return;
+      }
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(source);
+        return;
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => resolve(blob || source), "image/png");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(source);
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Removes background surfaces (carpet, table, floor) from an uploaded garment photo
+ * directly in the browser, returning a transparent PNG file.
+ */
+export async function isolateGarment(
+  file: File,
+  fileName: string = "garment-isolated.png"
+): Promise<File> {
+  const { removeBackground } = await import("@imgly/background-removal");
+  const optimizedInput = await downscaleForSegmentation(file, 512);
+
+  const config: Config = {
+    model: "isnet_quint8",
+    output: {
+      format: "image/png",
+      quality: 0.95,
+    },
+  };
+
+  const blob = await removeBackground(optimizedInput as ImageSource, config);
+  const baseName = fileName.replace(/\.[^/.]+$/, "");
+  return new File([blob], `${baseName}.png`, { type: "image/png" });
+}
+
+/**
+ * Compresses user-uploaded photos in the browser before network upload.
+ * Preserves PNG / WebP transparency (avoiding flattening alpha pixels to opaque JPEG).
+ */
 export async function compressImageForUpload(
   file: File,
   maxDimension: number = 2048,
   quality: number = 0.88
 ): Promise<File> {
-  // If file is already under 600KB and reasonably sized, avoid re-encoding
-  if (file.size < 600 * 1024 && !file.type.includes('heic')) {
+  if (file.size < 600 * 1024 && !file.type.includes("heic")) {
     return file;
   }
 
-  // Only process standard browser-supported image MIME types
-  if (!file.type.startsWith('image/')) {
+  if (!file.type.startsWith("image/")) {
     return file;
   }
 
@@ -39,7 +127,6 @@ export async function compressImageForUpload(
         return;
       }
 
-      // Compute downscaled dimensions preserving aspect ratio
       if (width > maxDimension || height > maxDimension) {
         if (width > height) {
           height = Math.round((height * maxDimension) / width);
@@ -50,22 +137,21 @@ export async function compressImageForUpload(
         }
       }
 
-      const canvas = document.createElement('canvas');
+      const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (!ctx) {
         resolve(file);
         return;
       }
 
       ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Convert heavy PNGs/HEICs to clean JPEGs for 90% size reduction
-      const targetMime = file.type === 'image/png' && file.size > 1.5 * 1024 * 1024 ? 'image/jpeg' : file.type || 'image/jpeg';
+      const isPngOrWebp = file.type === "image/png" || file.type === "image/webp";
+      const targetMime = isPngOrWebp ? file.type : "image/jpeg";
 
       canvas.toBlob(
         (blob) => {
@@ -74,8 +160,8 @@ export async function compressImageForUpload(
             return;
           }
 
-          const ext = targetMime === 'image/jpeg' ? 'jpg' : 'png';
-          const cleanName = file.name.replace(/\.[^/.]+$/, '') + `.${ext}`;
+          const ext = targetMime === "image/jpeg" ? "jpg" : targetMime === "image/webp" ? "webp" : "png";
+          const cleanName = file.name.replace(/\.[^/.]+$/, "") + `.${ext}`;
           const compressed = new File([blob], cleanName, { type: targetMime });
           resolve(compressed);
         },
@@ -94,8 +180,7 @@ export async function compressImageForUpload(
 }
 
 /**
- * Rotates an image file by a specified angle (default 90 deg clockwise)
- * and returns the rotated File object.
+ * Rotates an image file by a specified angle (default 90 deg clockwise).
  */
 export async function rotateImageFile(file: File, degrees: number = 90): Promise<File> {
   return new Promise((resolve) => {
@@ -104,8 +189,8 @@ export async function rotateImageFile(file: File, degrees: number = 90): Promise
 
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
       if (!ctx) {
         resolve(file);
         return;
@@ -117,12 +202,12 @@ export async function rotateImageFile(file: File, degrees: number = 90): Promise
       canvas.height = is90or270 ? img.width : img.height;
 
       ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+      ctx.imageSmoothingQuality = "high";
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(rads);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
 
-      const mime = file.type || 'image/jpeg';
+      const mime = file.type || "image/jpeg";
       canvas.toBlob(
         (blob) => {
           if (!blob) {

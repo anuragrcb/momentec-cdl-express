@@ -8,7 +8,7 @@ import { Wordmark } from "@/components/Wordmark";
 import { ManufacturerSvgCuts } from "@/components/ManufacturerSvgCuts";
 import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, StyleRecommendation, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
 import { getApparelAssetDescriptor } from "@/lib/apparel-assets";
-import { compressImageForUpload, rotateImageFile } from "@/lib/client-image";
+import { compressImageForUpload, rotateImageFile, isolateGarment, preloadBackgroundRemoval } from "@/lib/client-image";
 import { normalizeStyleNumber } from "@/lib/style-identity";
 
 const ThreeViewer = dynamic(() => import("@/components/ThreeViewer").then((m) => m.ThreeViewer), {
@@ -41,6 +41,7 @@ type ImageState = {
   url: string;
   savedUrl?: string;
   originalSavedUrl?: string;
+  isBgRemoved?: boolean;
   /** true when this view was invented by the model rather than uploaded by the
    *  customer - carried so every screen can keep labelling it as generated */
   generated?: boolean;
@@ -124,6 +125,7 @@ function DesignWizard() {
   const [comments, setComments] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bgProcessingSlots, setBgProcessingSlots] = useState<Partial<Record<Slot, boolean>>>({});
   const [savedRequest, setSavedRequest] = useState<MockupRequest | null>(null);
   const [viewGenNote, setViewGenNote] = useState<string | null>(null);
   const [mappedProofReady, setMappedProofReady] = useState(false);
@@ -142,13 +144,75 @@ function DesignWizard() {
       bakeStatus?.status === "failed")),
   );
 
+  // Silently warm up the background removal WASM model in the background on Step 01
+  useEffect(() => {
+    if (step === "upload") {
+      const timer = setTimeout(() => {
+        preloadBackgroundRemoval().catch(() => {});
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [step]);
+
   const onPickFile = async (slot: Slot, rawFile: File | null) => {
     if (!rawFile) return;
+
+    // 1. Show raw image immediately for instant visual feedback
+    const rawUrl = URL.createObjectURL(rawFile);
+    setImages((prev) => ({
+      ...prev,
+      [slot]: { file: rawFile, url: rawUrl, isBgRemoved: false },
+    }));
+
+    // 2. Set loading spinner only for this specific slot
+    setBgProcessingSlots((prev) => ({ ...prev, [slot]: true }));
+    setError(null);
+
     try {
-      const file = await compressImageForUpload(rawFile);
-      setImages((prev) => ({ ...prev, [slot]: { file, url: URL.createObjectURL(file) } }));
-    } catch {
-      setImages((prev) => ({ ...prev, [slot]: { file: rawFile, url: URL.createObjectURL(rawFile) } }));
+      // 3. Automatically remove background on this slot
+      const isolated = await isolateGarment(rawFile, `${slot}-isolated.png`);
+      const isolatedUrl = URL.createObjectURL(isolated);
+
+      // 4. Update only this slot with the clean cutout
+      setImages((prev) => {
+        if (!prev[slot]) return prev;
+        return {
+          ...prev,
+          [slot]: {
+            ...prev[slot]!,
+            file: isolated,
+            url: isolatedUrl,
+            isBgRemoved: true,
+            savedUrl: undefined,
+          },
+        };
+      });
+    } catch (err) {
+      console.warn(`Auto background removal for ${slot} skipped:`, err);
+      // Graceful fallback to compressed original
+      try {
+        const compressed = await compressImageForUpload(rawFile);
+        const compUrl = URL.createObjectURL(compressed);
+        setImages((prev) => {
+          if (!prev[slot]) return prev;
+          return {
+            ...prev,
+            [slot]: {
+              ...prev[slot]!,
+              file: compressed,
+              url: compUrl,
+              isBgRemoved: false,
+            },
+          };
+        });
+      } catch {}
+    } finally {
+      // Clear loading state for this slot
+      setBgProcessingSlots((prev) => {
+        const next = { ...prev };
+        delete next[slot];
+        return next;
+      });
     }
   };
 
@@ -526,61 +590,74 @@ function DesignWizard() {
             <span className="stage-number">01</span>
             <div>
               <h2>Upload your original views</h2>
-              <p className="sub">Front is required. Back, left and right are optional. Files are analyzed as supplied—there is no background-removal or preparation step.</p>
+              <p className="sub">Front is required. Back, left and right are optional. Garment backgrounds are automatically removed upon upload.</p>
             </div>
           </div>
           <div className="upload-grid">
-            {(["front", "back", "left", "right"] as Slot[]).map((slot) => (
-              <div key={slot} className="upload-slot-wrapper" style={{ position: "relative" }}>
-                <label className={`upload-slot ${slot === "front" ? "required" : ""}`}>
-                  {images[slot] ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={images[slot]!.url} alt={slot} />
-                      {images[slot]!.generated && <span className="gen-badge">AI generated</span>}
-                    </>
-                  ) : (
-                    <>
-                      <span className="label">{slot}</span>
-                      <span className="req">{slot === "front" ? "required" : "optional"}</span>
-                    </>
+            {(["front", "back", "left", "right"] as Slot[]).map((slot) => {
+              const entry = images[slot];
+              const isProcessing = Boolean(bgProcessingSlots[slot]);
+
+              return (
+                <div key={slot} className="upload-slot-wrapper" style={{ position: "relative" }}>
+                  <label className={`upload-slot ${slot === "front" ? "required" : ""} ${entry?.isBgRemoved ? "bg-removed" : ""}`}>
+                    {entry ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={entry.url} alt={slot} />
+                        {entry.generated && <span className="gen-badge">AI generated</span>}
+                      </>
+                    ) : (
+                      <>
+                        <span className="label">{slot}</span>
+                        <span className="req">{slot === "front" ? "required" : "optional"}</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={isProcessing}
+                      onChange={(e) => onPickFile(slot, e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+
+                  {isProcessing && (
+                    <div className="slot-loading-overlay">
+                      <div className="slot-spinner" />
+                    </div>
                   )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => onPickFile(slot, e.target.files?.[0] ?? null)}
-                  />
-                </label>
-                {images[slot] && (
-                  <div className="slot-actions">
-                    <button
-                      type="button"
-                      className="slot-btn"
-                      title="Rotate 90° Clockwise"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onRotateSlot(slot);
-                      }}
-                    >
-                      ⟳ Rotate
-                    </button>
-                    <button
-                      type="button"
-                      className="slot-btn"
-                      title="Remove"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onRemoveSlot(slot);
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+
+                  {entry && !isProcessing && (
+                    <div className="slot-actions">
+                      <button
+                        type="button"
+                        className="slot-btn"
+                        title="Rotate 90° Clockwise"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onRotateSlot(slot);
+                        }}
+                      >
+                        ⟳ Rotate
+                      </button>
+                      <button
+                        type="button"
+                        className="slot-btn"
+                        title="Remove"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onRemoveSlot(slot);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="field known-style-field">
