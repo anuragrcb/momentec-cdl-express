@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { Wordmark } from "@/components/Wordmark";
-import { ManufacturerSvgCuts } from "@/components/ManufacturerSvgCuts";
 import type { ArtworkAnalysis, ArtworkIntelligence, ArtworkPackage, StyleMatch, StyleRecommendation, BakeStatus, BakeStats, MockupRequest } from "@/lib/types";
 import { getApparelAssetDescriptor } from "@/lib/apparel-assets";
 import { compressImageForUpload, rotateImageFile, isolateGarment, preloadBackgroundRemoval } from "@/lib/client-image";
@@ -143,6 +142,7 @@ function DesignWizard() {
       ((bakeStatus?.status === "done" && bakeStatus.glbUrl && ["good", "usable"].includes(bakeStatus.stats?.verdict ?? "")) ||
       bakeStatus?.status === "failed")),
   );
+  const hasPendingImageProcessing = Object.values(bgProcessingSlots).some(Boolean);
 
   // Silently warm up the background removal WASM model in the background on Step 01
   useEffect(() => {
@@ -243,6 +243,10 @@ function DesignWizard() {
       setError("A front image is required.");
       return;
     }
+    if (hasPendingImageProcessing) {
+      setError("Please wait for image preparation to finish before continuing.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -250,7 +254,11 @@ function DesignWizard() {
       if (sessionId) form.append("sessionId", sessionId);
       for (const slot of Object.keys(images) as Slot[]) {
         const entry = images[slot];
-        if (entry?.file) {
+        // Generated side views already live in this session under an explicit
+        // `-generated` filename. Do not upload them again as left.png/right.png:
+        // doing so makes a visual extrapolation indistinguishable from a
+        // customer-supplied production source in every later API.
+        if (entry?.file && !entry.generated) {
           const fileToUpload = await compressImageForUpload(entry.file);
           form.append(slot, fileToUpload);
         }
@@ -293,7 +301,7 @@ function DesignWizard() {
     } finally {
       setBusy(false);
     }
-  }, [images, sessionId, knownStyleNumber]);
+  }, [images, sessionId, knownStyleNumber, hasPendingImageProcessing]);
 
   /**
    * Fills in the views the customer didn't upload, using the ones they did.
@@ -303,6 +311,10 @@ function DesignWizard() {
    */
   const handleGenerateViews = useCallback(async () => {
     if (!images.front) return;
+    if (hasPendingImageProcessing) {
+      setError("Please wait for image preparation to finish before generating missing views.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -310,7 +322,9 @@ function DesignWizard() {
       if (sessionId) form.append("sessionId", sessionId);
       for (const slot of Object.keys(images) as Slot[]) {
         const entry = images[slot];
-        if (entry?.file) {
+        // Regeneration must be grounded in customer uploads, not in an older
+        // model-generated view that was subsequently removed or replaced.
+        if (entry?.file && !entry.generated) {
           const fileToUpload = await compressImageForUpload(entry.file);
           form.append(slot, fileToUpload);
         }
@@ -358,7 +372,7 @@ function DesignWizard() {
     } finally {
       setBusy(false);
     }
-  }, [images, sessionId]);
+  }, [images, sessionId, hasPendingImageProcessing]);
 
   const handleAnalyzeContinue = useCallback(async () => {
     if (!analysis) return;
@@ -470,9 +484,9 @@ function DesignWizard() {
         body: JSON.stringify({
           images: {
             front: images.front.savedUrl,
-            back: images.back?.savedUrl,
-            left: images.left?.savedUrl,
-            right: images.right?.savedUrl,
+            back: !images.back?.generated ? images.back?.savedUrl : undefined,
+            left: !images.left?.generated ? images.left?.savedUrl : undefined,
+            right: !images.right?.generated ? images.right?.savedUrl : undefined,
           },
           originalImages: {
             front: images.front.originalSavedUrl || images.front.savedUrl,
@@ -521,9 +535,9 @@ function DesignWizard() {
         body: JSON.stringify({
           images: {
             front: images.front.savedUrl,
-            back: images.back?.savedUrl,
-            left: images.left?.savedUrl,
-            right: images.right?.savedUrl,
+            back: !images.back?.generated ? images.back?.savedUrl : undefined,
+            left: !images.left?.generated ? images.left?.savedUrl : undefined,
+            right: !images.right?.generated ? images.right?.savedUrl : undefined,
           },
           sessionId,
           analysis,
@@ -682,8 +696,8 @@ function DesignWizard() {
               {missingSlots.length > 1 ? "those sides" : "that side"} of your garment — so they stay marked as generated and
               are not production reference. Uploading real views is always better.
               <div style={{ marginTop: 12 }}>
-                <button className="btn btn-secondary btn-sm" disabled={busy} onClick={handleGenerateViews}>
-                  {busy ? "Working…" : `Generate ${missingSlots.join(" + ")}`}
+                <button className="btn btn-secondary btn-sm" disabled={busy || hasPendingImageProcessing} onClick={handleGenerateViews}>
+                  {hasPendingImageProcessing ? "Preparing images…" : busy ? "Working…" : `Generate ${missingSlots.join(" + ")}`}
                 </button>
               </div>
             </div>
@@ -698,10 +712,10 @@ function DesignWizard() {
           <div className="actions-row" style={{ justifyContent: "flex-end" }}>
             <button
               className="btn btn-primary"
-              disabled={busy || !images.front}
+              disabled={busy || !images.front || hasPendingImageProcessing}
               onClick={handleUploadContinue}
             >
-              {busy ? "Analyzing…" : "Analyze My Design"}
+              {hasPendingImageProcessing ? "Preparing images…" : busy ? "Analyzing…" : "Analyze My Design"}
             </button>
           </div>
         </div>
@@ -1077,9 +1091,10 @@ function DesignWizard() {
                 <AugustaMaterialBake
                   sku={chosen.style.parentSku}
                   frontImageUrl={images.front.savedUrl || images.front.url}
-                  backImageUrl={!images.back?.generated ? images.back?.savedUrl || images.back?.url : undefined}
-                  leftImageUrl={!images.left?.generated ? images.left?.savedUrl || images.left?.url : undefined}
-                  rightImageUrl={!images.right?.generated ? images.right?.savedUrl || images.right?.url : undefined}
+                  backImageUrl={images.back?.savedUrl || images.back?.url}
+                  leftImageUrl={images.left?.savedUrl || images.left?.url}
+                  rightImageUrl={images.right?.savedUrl || images.right?.url}
+                  alignTeeSleevesToCut={chosen.style.parentSku === "228180"}
                   onReady={setMappedProofReady}
                   onWarning={setMappedProofWarning}
                 />
@@ -1087,7 +1102,7 @@ function DesignWizard() {
               <div className="viewer-status" style={{ position: "relative", inset: "auto", minHeight: 76 }}>
                 <strong>Verified manufacturer 3D proof</strong>
                 <span>
-                  Your original supplied views are mapped to the official {chosen.style.name} GLB. AI-generated views are not used as production artwork.
+                  Your views are mapped to the official {chosen.style.name} GLB. Generated side views may complete this visual proof, but they are excluded from production artwork extraction.
                 </span>
               </div>
               {mappedProofWarning && (
@@ -1110,15 +1125,6 @@ function DesignWizard() {
                 </span>
               </div>
             </div>
-          )}
-
-          {chosenAsset?.cutPieceSvgUrl && chosenAsset.cutPieceSvgUsesSizeGroups && (
-            <ManufacturerSvgCuts
-              svgUrl={chosenAsset.cutPieceSvgUrl}
-              size={proofSize}
-              styleName={chosen.style.name}
-              expanded={chosen.style.parentSku === "228180"}
-            />
           )}
 
           <div className="actions-row">

@@ -305,6 +305,70 @@ function cropSource(
   return canvas;
 }
 
+/** Unwarps a photographed four-corner sleeve into the manufacturer's flat
+ * sleeve-panel orientation. A simple rotation is insufficient: in a laid-
+ * flat garment the cuff is a short diagonal edge, whereas in the production
+ * SVG it spans the complete straight lower edge. Bilinear quad mapping makes
+ * those two cuff endpoints fill the full panel width and excludes every
+ * pixel outside the physical sleeve (torso artwork and carpet included). */
+function warpQuadToPanel(
+  image: ArtworkSource,
+  quad: { topLeft: [number, number]; topRight: [number, number]; bottomRight: [number, number]; bottomLeft: [number, number] },
+  outputWidth = 700,
+  outputHeight = 280,
+): HTMLCanvasElement {
+  const sourceW = sourceWidth(image);
+  const sourceH = sourceHeight(image);
+  const sampleScale = Math.min(1, 1200 / Math.max(sourceW, sourceH));
+  const sample = document.createElement("canvas");
+  sample.width = Math.max(1, Math.round(sourceW * sampleScale));
+  sample.height = Math.max(1, Math.round(sourceH * sampleScale));
+  const sampleContext = sample.getContext("2d", { willReadFrequently: true });
+  const output = document.createElement("canvas");
+  output.width = outputWidth;
+  output.height = outputHeight;
+  const outputContext = output.getContext("2d");
+  if (!sampleContext || !outputContext) return output;
+  sampleContext.drawImage(image, 0, 0, sample.width, sample.height);
+  const sourcePixels = sampleContext.getImageData(0, 0, sample.width, sample.height);
+  const result = outputContext.createImageData(outputWidth, outputHeight);
+
+  for (let y = 0; y < outputHeight; y++) {
+    const v = y / Math.max(1, outputHeight - 1);
+    for (let x = 0; x < outputWidth; x++) {
+      const u = x / Math.max(1, outputWidth - 1);
+      const topX = quad.topLeft[0] * (1 - u) + quad.topRight[0] * u;
+      const topY = quad.topLeft[1] * (1 - u) + quad.topRight[1] * u;
+      const bottomX = quad.bottomLeft[0] * (1 - u) + quad.bottomRight[0] * u;
+      const bottomY = quad.bottomLeft[1] * (1 - u) + quad.bottomRight[1] * u;
+      const sx = Math.max(0, Math.min(sample.width - 1, Math.round((topX * (1 - v) + bottomX * v) * sample.width)));
+      const sy = Math.max(0, Math.min(sample.height - 1, Math.round((topY * (1 - v) + bottomY * v) * sample.height)));
+      const sourceOffset = (sy * sample.width + sx) * 4;
+      const targetOffset = (y * outputWidth + x) * 4;
+      result.data[targetOffset] = sourcePixels.data[sourceOffset];
+      result.data[targetOffset + 1] = sourcePixels.data[sourceOffset + 1];
+      result.data[targetOffset + 2] = sourcePixels.data[sourceOffset + 2];
+      result.data[targetOffset + 3] = sourcePixels.data[sourceOffset + 3];
+    }
+  }
+  outputContext.putImageData(result, 0, 0);
+  return output;
+}
+
+function previewDataUrl(image: ArtworkSource | undefined): string | undefined {
+  if (!image) return undefined;
+  const width = sourceWidth(image);
+  const height = sourceHeight(image);
+  const scale = Math.min(1, 420 / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) return undefined;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
 function removeConnectedEdgeBackground(image: ArtworkSource): HTMLCanvasElement {
   const width = sourceWidth(image), height = sourceHeight(image);
   const canvas = document.createElement("canvas");
@@ -850,6 +914,20 @@ export interface AugustaMaterialBakeProps {
   onWarning?: (message: string) => void;
   /** Optional deterministic inspection angle used by the test harness. */
   view?: "front" | "back" | "left" | "right";
+  /** Test-laboratory switch for 228180. A laid-flat garment photo stores the
+   * cuff on the outer horizontal edge, while the manufacturer sleeve panel
+   * stores it on the lower edge. This normalizes the photo crop to the cut
+   * orientation. It is opt-in so the customer flow is unchanged until the
+   * isolated proof has been approved. */
+  alignTeeSleevesToCut?: boolean;
+  /** Exposes the exact normalized crops on the isolated test page so the
+   * photo-to-cut decision can be reviewed next to the official SVG. */
+  onTeeSleeveCuts?: (cuts: {
+    frontLeft?: string;
+    frontRight?: string;
+    backLeft?: string;
+    backRight?: string;
+  }) => void;
 }
 
 export function AugustaMaterialBake({
@@ -863,6 +941,8 @@ export function AugustaMaterialBake({
   onReady,
   onWarning,
   view = "front",
+  alignTeeSleevesToCut = false,
+  onTeeSleeveCuts,
 }: AugustaMaterialBakeProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -976,14 +1056,36 @@ export function AugustaMaterialBake({
           const garment = cropToGarment(original);
           const cleanEdgePanel = (source: ArtworkSource) => trimTransparentBounds(removeNeutralPhotoSurface(source));
           const collarReference = cleanEdgePanel(cropSource(garment, 0.43, 0.01, 0.57, 0.14));
+          // 228180's set-in sleeves sit diagonally in the laid-flat source
+          // photo. A bounding rectangle also contains chest artwork above
+          // the armhole and carpet below the cuff. The test-lab path uses
+          // the visible four-sided sleeve silhouette instead: shoulder cap,
+          // outer cuff, lower cuff, underarm. The right polygon is its
+          // physical mirror, not a duplicated texture.
+          const screenLeftCrop = alignTeeSleevesToCut
+            ? warpQuadToPanel(garment, {
+                topLeft: [0.235, 0.055],
+                topRight: [0.255, 0.37],
+                bottomRight: [0.100, 0.38],
+                bottomLeft: [0.000, 0.175],
+              })
+            : cropSource(garment, 0, 0.06, 0.30, 0.50);
+          const screenRightCrop = alignTeeSleevesToCut
+            ? warpQuadToPanel(garment, {
+                topLeft: [0.745, 0.37],
+                topRight: [0.765, 0.055],
+                bottomRight: [1.000, 0.175],
+                bottomLeft: [0.900, 0.38],
+              })
+            : cropSource(garment, 0.70, 0.06, 1, 0.50);
           return {
             // The torso already has an edge-connected background mask from
             // cropToGarment. Only trim its empty/neutral outer rows here;
             // applying the stronger neutral filter inside the panel would
             // erase legitimate black and grey artwork around logos.
             torso: cleanTorsoPanel(cropSource(garment, 0.18, 0.02, 0.82, 1)),
-            screenLeftSleeve: cleanEdgePanel(cropSource(garment, 0, 0.08, 0.28, 0.42)),
-            screenRightSleeve: cleanEdgePanel(cropSource(garment, 0.72, 0.08, 1, 0.42)),
+            screenLeftSleeve: cleanEdgePanel(screenLeftCrop),
+            screenRightSleeve: cleanEdgePanel(screenRightCrop),
             collar: solidColorSource(dominantMaterialColorCss(collarReference)),
             sideSleeve: cleanEdgePanel(cropSource(garment, 0.08, 0, 0.92, 0.48)),
           };
@@ -992,6 +1094,14 @@ export function AugustaMaterialBake({
         const backPrepared = teeProof ? prepareTeeView(backTex) : undefined;
         const leftPrepared = teeProof ? prepareTeeView(leftTex) : undefined;
         const rightPrepared = teeProof ? prepareTeeView(rightTex) : undefined;
+        if (teeProof && onTeeSleeveCuts) {
+          onTeeSleeveCuts({
+            frontLeft: previewDataUrl(frontPrepared?.screenLeftSleeve),
+            frontRight: previewDataUrl(frontPrepared?.screenRightSleeve),
+            backLeft: previewDataUrl(backPrepared?.screenLeftSleeve),
+            backRight: previewDataUrl(backPrepared?.screenRightSleeve),
+          });
+        }
         if (teeProof && !backPrepared) {
           onWarning?.("No original back photo was supplied. The front is repeated on the back for preview only; upload the real back before production review.");
         }
@@ -1107,10 +1217,25 @@ export function AugustaMaterialBake({
                   if (leftPhoto || rightPhoto) {
                     sleeves = pickSleeveIslands(islands, [frontTorso, backTorso]);
                     if (leftPhoto && sleeves.left) {
-                      regions.push({ photo: leftPhoto, island: sleeves.left, mirror: !teeProof });
+                      regions.push({
+                        photo: leftPhoto,
+                        island: sleeves.left,
+                        mirror: !teeProof,
+                        // 228180's sleeve-island V direction is opposite the
+                        // flat SVG panel direction. Once the laid-flat crop
+                        // has been quarter-turned, flip its vertical travel
+                        // so the pink cuff lands on the physical opening,
+                        // not at the shoulder seam.
+                        rotate180: teeProof && alignTeeSleevesToCut,
+                      });
                     }
                     if (rightPhoto && sleeves.right) {
-                      regions.push({ photo: rightPhoto, island: sleeves.right, mirror: !teeProof });
+                      regions.push({
+                        photo: rightPhoto,
+                        island: sleeves.right,
+                        mirror: !teeProof,
+                        rotate180: teeProof && alignTeeSleevesToCut,
+                      });
                     }
                   }
                   if (teeProof && frontPrepared?.collar) {
@@ -1227,7 +1352,7 @@ export function AugustaMaterialBake({
       mount.removeChild(renderer.domElement);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sku, frontImageUrl, backImageUrl, leftImageUrl, rightImageUrl, useNormalMap, view]);
+  }, [sku, frontImageUrl, backImageUrl, leftImageUrl, rightImageUrl, useNormalMap, view, alignTeeSleevesToCut, onTeeSleeveCuts]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>

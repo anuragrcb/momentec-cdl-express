@@ -53,8 +53,8 @@ const VERIFIED_EXTERNAL_STYLES: CatalogueStyle[] = [
     renderSize: "S/M/L size-specific GLBs",
     construction: {
       sleeveLength: "short",
-      neckline: "v-neck",
-      sleeveConstruction: "set-in",
+      neckline: "collared",
+      sleeveConstruction: "raglan",
       audience: "adult",
       frontClosure: "full-button",
     },

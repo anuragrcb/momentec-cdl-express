@@ -12,6 +12,12 @@ const AugustaMaterialBake = dynamic(
 type ViewSlot = "front" | "back" | "left" | "right";
 type ViewUrls = Partial<Record<ViewSlot, string>>;
 type ProofView = "front" | "back" | "left" | "right";
+type TeeSleeveCuts = {
+  frontLeft?: string;
+  frontRight?: string;
+  backLeft?: string;
+  backRight?: string;
+};
 
 const VIEW_LABELS: Record<ViewSlot, string> = {
   front: "Front",
@@ -57,6 +63,7 @@ export default function VerifiedTeeTestPage() {
   const [warning, setWarning] = useState("");
   const [capture, setCapture] = useState("");
   const [proofView, setProofView] = useState<ProofView>("front");
+  const [sleeveCuts, setSleeveCuts] = useState<TeeSleeveCuts>({});
   const createdUrls = useRef<string[]>([]);
 
   useEffect(() => () => createdUrls.current.forEach((url) => URL.revokeObjectURL(url)), []);
@@ -174,6 +181,32 @@ export default function VerifiedTeeTestPage() {
           />
         </div>
 
+        {Object.values(sleeveCuts).some(Boolean) && (
+          <div className="card" style={{ padding: 24, marginBottom: 24 }}>
+            <p style={{ color: "#005568", font: "800 11px Montserrat, sans-serif", letterSpacing: ".14em", textTransform: "uppercase" }}>
+              Photo-to-cut inspection
+            </p>
+            <h2 style={{ fontSize: 21, marginTop: 8 }}>Sleeve crops aligned to the SVG panels</h2>
+            <p style={{ color: "#525257", lineHeight: 1.55, marginTop: 8 }}>
+              These are the exact photo regions painted onto the two curved sleeve cuts above. The outer pink cuff is rotated to the straight lower edge of each manufacturer panel.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginTop: 18 }}>
+              {([
+                ["Front → wearer left", sleeveCuts.frontLeft],
+                ["Front → wearer right", sleeveCuts.frontRight],
+                ["Back → wearer left", sleeveCuts.backLeft],
+                ["Back → wearer right", sleeveCuts.backRight],
+              ] as const).map(([label, source]) => source && (
+                <figure key={label} style={{ margin: 0, border: "1px solid #d7d7da", background: "#fff", padding: 12 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={source} alt={`${label} normalized sleeve crop`} style={{ width: "100%", height: 150, objectFit: "contain", display: "block", background: "#f5f5f3" }} />
+                  <figcaption style={{ marginTop: 9, fontWeight: 800, fontSize: 12, textTransform: "uppercase" }}>{label}</figcaption>
+                </figure>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ padding: "22px 26px", borderBottom: "1px solid #e2e2e4", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
             <div>
@@ -213,6 +246,8 @@ export default function VerifiedTeeTestPage() {
                 onWarning={setWarning}
                 onCapture={setCapture}
                 view={proofView}
+                alignTeeSleevesToCut
+                onTeeSleeveCuts={setSleeveCuts}
               />
             ) : (
               <div className="viewer-status">
