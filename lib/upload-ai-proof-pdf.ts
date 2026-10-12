@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
+import { formatInches, placeLine, type MarkFit, type MarkPlace } from "./mark-measure";
 
 const PAGE_W = 612;
 const LETTER_H = 792;
@@ -34,11 +35,19 @@ export const PROOF_ORDER = {
 
 export type ProofColor = { name: string; hex: string };
 export type ProofFill = { role: string; name: string; hex: string };
-export type ProofDecoration = { group?: string; view: string; colors?: ProofColor[]; asset?: string };
+export type ProofDecoration = {
+  group?: string;
+  view: string;
+  colors?: ProofColor[];
+  asset?: string;
+  place?: MarkPlace;
+  fit?: MarkFit;
+};
 export type ProofSource = {
   fillColors?: ProofFill[];
   teamDecoration?: ProofDecoration[];
   rosterDecoration?: ProofDecoration[];
+  garmentSize?: string;
 };
 
 export function decorationAssetName(group: string, view: string): string {
@@ -61,11 +70,17 @@ function summaryPageHeight(fillCount: number): number {
   return Math.min(LETTER_H, last + 24);
 }
 
+function decorationRowHeight(item: ProofDecoration): number {
+  return item.place ? 96 : 78;
+}
+
+function decorationBlockHeight(items: ProofDecoration[] | undefined): number {
+  const rows = (items ?? []).reduce((sum, item) => sum + decorationRowHeight(item) + 5, 0);
+  return 16 + rows;
+}
+
 function decorationPageHeight(json: ProofSource): number {
-  const block = (count: number) => 16 + count * 83;
-  const team = json.teamDecoration?.length ?? 0;
-  const roster = json.rosterDecoration?.length ?? 0;
-  const last = 68 + block(team) + 6 + block(roster);
+  const last = 68 + decorationBlockHeight(json.teamDecoration) + 6 + decorationBlockHeight(json.rosterDecoration);
   return Math.min(LETTER_H, last + 22);
 }
 
@@ -104,7 +119,7 @@ function drawProof(
 ) {
   paintPage(doc, page1);
   drawHeader(doc, header);
-  drawSummary(doc, views, json.fillColors ?? []);
+  drawSummary(doc, views, json.fillColors ?? [], json.garmentSize);
   const page2 = decorationPageHeight(json);
   doc.addPage({ size: [PAGE_W, page2], margin: 0 });
   paintPage(doc, page2);
@@ -113,7 +128,7 @@ function drawProof(
   doc.addPage({ size: [PAGE_W, ROSTER_PAGE_H], margin: 0 });
   paintPage(doc, ROSTER_PAGE_H);
   drawHeader(doc, header);
-  drawRosterPage(doc);
+  drawRosterPage(doc, json.garmentSize);
 }
 
 function paintPage(doc: PDFKit.PDFDocument, pageH: number) {
@@ -141,6 +156,7 @@ function drawSummary(
   doc: PDFKit.PDFDocument,
   views: Record<"front" | "back", Buffer | null>,
   fills: ProofFill[],
+  garmentSize?: string,
 ) {
   doc.font("Helvetica-Bold").fontSize(13);
   const summary = "ORDER SUMMARY";
@@ -186,7 +202,11 @@ function drawSummary(
   garment.forEach(([label, value], index) => {
     const y = INFO_Y + 18 + index * 14;
     doc.font("Helvetica-Bold").fontSize(8).fillColor(INK).text(label, MARGIN + 10, y, { lineBreak: false });
-    hardText(doc, value, 140, y);
+    if (label === "SIZE :" && garmentSize) {
+      doc.font("Helvetica").fontSize(8).fillColor(INK).text(garmentSize, 140, y, { lineBreak: false });
+    } else {
+      hardText(doc, value, 140, y);
+    }
   });
   doc.font("Helvetica-Bold").fontSize(8).fillColor(INK).text("DESIGN:", 300, INFO_Y + 18, { lineBreak: false });
   hardText(doc, PROOF_ORDER.design, 360, INFO_Y + 18);
@@ -224,7 +244,7 @@ function drawDecorationRow(
   images: Map<string, Buffer>,
   header: Buffer | null,
 ): number {
-  const height = 78;
+  const height = decorationRowHeight(item);
   const top = ensureSpace(doc, y, height + 4, header);
   const x = MARGIN + 4;
   const w = PAGE_W - MARGIN * 2 - 8;
@@ -233,8 +253,19 @@ function drawDecorationRow(
 
   doc.font("Helvetica-Bold").fontSize(6.5).fillColor(INK);
   doc.text(item.view, x + 6, top + 6, { width: 108, lineGap: -1 });
-  hardText(doc, "ADJ: U:0  D:0  L:0  R:0", x + 6, top + 46, { size: 5.5, color: MUTED });
-  hardText(doc, specLine(item.view), x + 6, top + 56, { size: 5.5, color: MUTED });
+  const adjY = item.place ? 62 : 46;
+  const specY = item.place ? 74 : 56;
+  if (item.place) {
+    doc.font("Helvetica").fontSize(5.5).fillColor(MUTED).text(placeLine(item.place), x + 6, top + 30, { width: 112 });
+  }
+  if (item.fit) {
+    doc.font("Helvetica").fontSize(5.5).fillColor(MUTED);
+    doc.text(adjLine(item.fit), x + 6, top + adjY, { lineBreak: false });
+    doc.text(specLine(item.view, item.fit), x + 6, top + specY, { lineBreak: false });
+  } else {
+    hardText(doc, adjLine(), x + 6, top + adjY, { size: 5.5, color: MUTED });
+    hardText(doc, specLine(item.view), x + 6, top + specY, { size: 5.5, color: MUTED });
+  }
 
   const image = images.get(item.asset || decorationAssetName(item.group || group, item.view));
   if (image) doc.image(image, x + 130, top + 4, { fit: [170, height - 8], align: "center", valign: "center" });
@@ -254,10 +285,17 @@ function drawDecorationRow(
   return top + height + 5;
 }
 
-function specLine(view: string): string {
-  if (view.endsWith("NUMBER")) return "SENTINEL: 1.5 INCH";
-  if (view.endsWith("NAME")) return "FULL BLOCK: 1.5 INCH";
-  return "ART HEIGHT: 1.5 INCH    ART WIDTH: 1.5 INCH";
+function adjLine(fit?: MarkFit): string {
+  if (!fit) return "ADJ: U:0  D:0  L:0  R:0";
+  return `ADJ: U:${formatInches(fit.upIn)}  D:${formatInches(fit.downIn)}  L:${formatInches(fit.leftIn)}  R:${formatInches(fit.rightIn)}`;
+}
+
+function specLine(view: string, fit?: MarkFit): string {
+  const height = fit ? `${formatInches(fit.heightIn)} INCH` : "1.5 INCH";
+  const width = fit ? `${formatInches(fit.widthIn)} INCH` : "1.5 INCH";
+  if (view.endsWith("NUMBER")) return `SENTINEL: ${height}`;
+  if (view.endsWith("NAME")) return `FULL BLOCK: ${height}`;
+  return `ART HEIGHT: ${height}    ART WIDTH: ${width}`;
 }
 
 function ensureSpace(doc: PDFKit.PDFDocument, y: number, height: number, header: Buffer | null): number {
@@ -268,10 +306,10 @@ function ensureSpace(doc: PDFKit.PDFDocument, y: number, height: number, header:
   return 68;
 }
 
-function drawRosterPage(doc: PDFKit.PDFDocument) {
+function drawRosterPage(doc: PDFKit.PDFDocument, garmentSize?: string) {
   doc.font("Helvetica-Bold").fontSize(9).fillColor(INK).text("ROSTER INFORMATION", MARGIN + 8, 70, { lineBreak: false });
   const headers = ["STYLE:", "NO:", "NAME:", "TOP SIZE:", "QTY:"];
-  const values = [PROOF_ORDER.style, PROOF_ORDER.playerNo, PROOF_ORDER.playerName, PROOF_ORDER.size, PROOF_ORDER.qty];
+  const values = [PROOF_ORDER.style, PROOF_ORDER.playerNo, PROOF_ORDER.playerName, garmentSize ?? PROOF_ORDER.size, PROOF_ORDER.qty];
   const columns = [MARGIN + 28, 150, 240, 370, 490];
   headers.forEach((header, index) => {
     doc.font("Helvetica-Bold").fontSize(8).fillColor(INK).text(header, columns[index], 96, { lineBreak: false });
@@ -281,6 +319,10 @@ function drawRosterPage(doc: PDFKit.PDFDocument) {
   doc.rect(tableX, 112, tableW, 22).lineWidth(0.6).strokeColor(LINE).stroke();
   doc.moveTo(columns[4] - 12, 112).lineTo(columns[4] - 12, 134).strokeColor(LINE).lineWidth(0.6).stroke();
   values.forEach((value, index) => {
+    if (index === 3 && garmentSize) {
+      doc.font("Helvetica").fontSize(8).fillColor(INK).text(value, columns[index], 118, { lineBreak: false });
+      return;
+    }
     hardText(doc, value, columns[index], 118);
   });
 

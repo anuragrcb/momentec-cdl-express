@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateGptImageSheet, uploadToMagnific } from "./magnific";
+import { fitSentence, readDecorationMeasures, type GarmentFit, type MarkFit, type MarkPlace } from "./mark-measure";
 
 export type ArtworkView = "front" | "back" | "left" | "right";
 
@@ -176,16 +177,18 @@ Return ONLY strict JSON, no markdown fences:
     { "role": "primary" | "second" | "third", "name": string, "hex": string }
   ],
   "teamDecoration": [
-    { "cell": "front" | "back" | "left" | "right", "view": string, "colors": [{ "name": string, "hex": string }], "prompt": string }
+    { "cell": "front" | "back" | "left" | "right", "view": string, "colors": [{ "name": string, "hex": string }], "prompt": string, "place": { "fromTop": number, "fromCenter": number, "width": number, "height": number }, "fit": { "widthIn": number, "heightIn": number, "upIn": number, "downIn": number, "leftIn": number, "rightIn": number } }
   ],
   "rosterDecoration": [
-    { "cell": "front" | "back" | "left" | "right", "view": string, "colors": [{ "name": string, "hex": string }], "prompt": string }
+    { "cell": "front" | "back" | "left" | "right", "view": string, "colors": [{ "name": string, "hex": string }], "prompt": string, "place": { "fromTop": number, "fromCenter": number, "width": number, "height": number }, "fit": { "widthIn": number, "heightIn": number, "upIn": number, "downIn": number, "leftIn": number, "rightIn": number } }
   ]
 }
 
 cell is the sheet quadrant where that mark is clearest. It is not the placement label.
 view is the exact spot on the garment, uppercase, then the word SUBLIMATION. Two to four place words. Judge it from the picture: compare the mark to the collar, the hem, and the vertical midline of that panel. Use CENTER only when the mark actually sits on that midline. If it sits to one side of the chest, name that side of the chest and say UPPER or LOWER when it is not mid-torso. If it sits on a sleeve, name that sleeve. Left and right mean the wearer's left and right, not the left and right of the picture. On the front cell, the wearer's left is on the right side of that cell. A roster number ends with SUBLIMATION NUMBER. A roster name ends with SUBLIMATION NAME. Do not describe the artwork in view: no LOGO, WORDMARK, GRAPHIC, CHARACTER, CREST, or PATCH. A logo is one mark; do not list letters or icons inside it. Name the place you see. Do not reuse a fixed list of places.
-prompt tells an image editor, which will also receive this same 2x2 sheet, to reproduce only that one mark. Name the whole mark and the same spot you used in view. If the chosen cell cuts it off, say to join the pieces from the neighboring cell and output the full mark, not the cropped slice. Do not invent parts that are not visible in any cell. Say to copy its shape and color exactly, centered on a plain white background with a white margin. Say not to draw the garment or any other mark.`;
+prompt tells an image editor, which will also receive this same 2x2 sheet, to reproduce only that one mark. Name the whole mark and the same spot you used in view. If the chosen cell cuts it off, say to join the pieces from the neighboring cell and output the full mark, not the cropped slice. Do not invent parts that are not visible in any cell. Say to copy its shape and color exactly, centered on a plain white background with a white margin. Say not to draw the garment or any other mark.
+place is where the mark sits on the garment in that cell, as fractions of the garment outline, not the cell frame. fromTop is 0 at the collar or waistband and 1 at the hem, at the center of the mark. fromCenter is -1 at the wearer's right edge, 0 on the vertical midline, and 1 at the wearer's left edge, at the center of the mark. width and height are the full mark divided by the garment width and height on that view. If the cell crops the mark, estimate the full mark from the neighboring cell. Use decimals. fromTop, width, and height are 0 to 1. fromCenter is -1 to 1.
+fit is the print size in inches for the gender and size named above. widthIn and heightIn are the art width and height. upIn, downIn, leftIn, and rightIn are the ADJ offsets. Use 0 for a direction that does not move. A roster number's heightIn is the sentinel height. A roster name's heightIn is the full block height. Grade these inches for that body. Do not copy one default onto every mark.`;
 
 export type DecorationGroup = "team" | "roster";
 export type NamedColor = { name: string; hex: string };
@@ -197,6 +200,8 @@ export type DecorationBrief = {
   colors: NamedColor[];
   prompt: string;
   asset?: string;
+  place?: MarkPlace;
+  fit?: MarkFit;
 };
 
 export type DecorationList = {
@@ -205,14 +210,14 @@ export type DecorationList = {
   rosterDecoration: DecorationBrief[];
 };
 
-export async function listDecorations(sheet: Buffer): Promise<DecorationList> {
+export async function listDecorations(sheet: Buffer, fit: GarmentFit): Promise<DecorationList> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");
   const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
   });
   const result = await model.generateContent([
-    { text: DECORATION_LIST_PROMPT },
+    { text: `${fitSentence(fit)}\n\n${DECORATION_LIST_PROMPT}` },
     { inlineData: { data: sheet.toString("base64"), mimeType: "image/png" } },
   ]);
   const raw = result.response.text();
@@ -274,7 +279,7 @@ function readDecorationGroup(value: unknown, group: DecorationGroup): Decoration
             return named ? [named] : [];
           }).slice(0, 8)
         : [];
-      return [{ group, view, cell, colors, prompt }];
+      return [{ group, view, cell, colors, prompt, ...readDecorationMeasures(item) }];
     });
 }
 
@@ -298,10 +303,11 @@ export type ExtractedDecorations = DecorationList & { images: Map<string, Buffer
 
 export async function extractDecorations(
   sheet: Buffer,
+  fit: GarmentFit,
   onProgress?: (percent: number) => void,
 ): Promise<ExtractedDecorations> {
   onProgress?.(8);
-  const listed = await listDecorations(sheet);
+  const listed = await listDecorations(sheet, fit);
   onProgress?.(18);
   const used = new Set<string>();
   const briefs = [...listed.teamDecoration, ...listed.rosterDecoration].map((brief, index) => ({

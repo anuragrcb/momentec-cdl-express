@@ -49,10 +49,10 @@ Real order data.
 The red fields below are still sample text from one reference proof. They need to come from the real order when that data exists.
 
 Measurements.
-Every mark is labeled 1.5 inch. Offsets are all zero. Real width, height, and placement offsets are not measured yet.
+Gender and Size on the form are sent with the four-view picture. Gemini returns where each mark sits as a fraction of the garment, and inch sizes graded for that gender and size. Those inches are drawn on the decoration row when they come back. If Gemini leaves them out, the row stays on the red 1.5 inch line and zero offsets.
 
 Customer form.
-Category, name, email, and message are collected on the page. They are not written into the PDF.
+Category, name, email, and message are collected on the page. They are not written into the PDF. Gender and Size are sent to Gemini. They are also written on the garment size line and the roster top size.
 
 Vercel free plan.
 Proof PDF generation can fail on a Vercel Hobby (free) account. The proof waits on Gemini and then on many Magnific image edits. That work can run longer than the free plan allows for one request, so Upload design can error even when the same flow succeeds elsewhere.
@@ -70,7 +70,6 @@ Order block
 
 Garment block
 - Style #: 228435
-- Size: MOCKUP
 - Qty: 1
 - Design: CUSTOM (STRIKEOUT)
 
@@ -78,14 +77,13 @@ Roster table
 - Style: 228435
 - No: 10
 - Name: PLAYER
-- Top size: MOCKUP
 - Qty: 1
 
 Customer comment
 - The long note about recreating a youth jersey on a ladies style because the wrong SKU was used and the strikeout template was not available.
 - The Momentec configurator URL stored with that note.
 
-On every decoration row
+On every decoration row, only when Gemini does not return a size
 - ADJ: U:0  D:0  L:0  R:0
 - Number rows: SENTINEL: 1.5 INCH
 - Name rows: FULL BLOCK: 1.5 INCH
@@ -104,5 +102,7 @@ These are not hardcoded.
 - The front and back pictures on page 1.
 - Each decoration picture.
 - Placement names, such as where the mark sits, then the word SUBLIMATION.
+- Gender and size chosen on the form, shown as the garment size and the roster top size.
+- Each mark's placement fractions and inch sizes, when Gemini returns them.
 - Garment fill colors: role, name, and hex.
 - Each mark's color names and hex values.

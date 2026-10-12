@@ -3,6 +3,7 @@
 import { FormEvent, MouseEvent, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { compressImageForUpload, isolateGarment, preloadBackgroundRemoval } from "@/lib/client-image";
+import { GARMENT_GENDERS, GARMENT_SIZES, readGarmentFit } from "@/lib/mark-measure";
 import "./upload-ai-design.css";
 
 const UploadAiModel = dynamic(() => import("./UploadAiModel").then((mod) => mod.UploadAiModel), { ssr: false });
@@ -94,6 +95,8 @@ export function UploadAiDesignModal() {
   const [generating, setGenerating] = useState(false);
   const [editNote, setEditNote] = useState("");
   const [category, setCategory] = useState("");
+  const [gender, setGender] = useState("");
+  const [size, setSize] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [proofProgress, setProofProgress] = useState(0);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
@@ -353,8 +356,15 @@ export function UploadAiDesignModal() {
       setFileError("Make the four views before uploading the design.");
       return;
     }
+    const fit = readGarmentFit(gender, size);
+    if (!fit) {
+      setFileError("Choose a gender and a size.");
+      return;
+    }
     const body = new FormData();
     body.append("sheet", sheet);
+    body.append("gender", fit.gender);
+    body.append("size", fit.size);
     setPreparing(true);
     setProofProgress(0);
     setFileError("");
@@ -542,6 +552,47 @@ export function UploadAiDesignModal() {
                   ))}
                 </select>
               </label>
+
+              <div className="upload-ai-fit">
+                <label className="upload-ai-field">
+                  <span><i>*</i>Gender:</span>
+                  <select
+                    name="gender"
+                    required
+                    value={gender}
+                    className={gender ? undefined : "is-placeholder"}
+                    onChange={(event) => setGender(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select
+                    </option>
+                    {GARMENT_GENDERS.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="upload-ai-field">
+                  <span><i>*</i>Size:</span>
+                  <select
+                    name="size"
+                    required
+                    value={size}
+                    className={size ? undefined : "is-placeholder"}
+                    onChange={(event) => setSize(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select
+                    </option>
+                    {GARMENT_SIZES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
               <label className="upload-ai-field">
                 <span><i>*</i>Name:</span>

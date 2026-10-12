@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { garmentLabel, readGarmentFit } from "@/lib/mark-measure";
 import { buildProofPdf } from "@/lib/upload-ai-proof-pdf";
 import { extractDecorations } from "@/lib/upload-ai-sheet";
 
@@ -13,6 +14,8 @@ export async function POST(req: NextRequest) {
   if (!(sheetFile instanceof File) || sheetFile.size === 0) {
     return Response.json({ error: "Make the four views first." }, { status: 400 });
   }
+  const fit = readGarmentFit(form.get("gender"), form.get("size"));
+  if (!fit) return Response.json({ error: "Choose a gender and a size." }, { status: 400 });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -22,11 +25,11 @@ export async function POST(req: NextRequest) {
       };
       try {
         send({ progress: 2 });
-        const extracted = await extractDecorations(Buffer.from(await sheetFile.arrayBuffer()), (progress) => {
+        const extracted = await extractDecorations(Buffer.from(await sheetFile.arrayBuffer()), fit, (progress) => {
           send({ progress });
         });
         send({ progress: 96 });
-        const pdf = await buildProofPdf(extracted, extracted.images);
+        const pdf = await buildProofPdf({ ...extracted, garmentSize: garmentLabel(fit) }, extracted.images);
         send({ progress: 100, pdf: pdf.toString("base64") });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not make the proof.";

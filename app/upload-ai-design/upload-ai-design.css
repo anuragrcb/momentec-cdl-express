@@ -487,6 +487,17 @@
   margin-top: 0;
 }
 
+.upload-ai-fit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.upload-ai-fit .upload-ai-field {
+  margin-top: 0;
+}
+
 .upload-ai-field span {
   display: block;
   margin-bottom: 4px;
