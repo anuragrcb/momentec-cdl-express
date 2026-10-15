@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { CatalogMatchError } from "@/lib/catalog-match";
 import { generateMissingSheet, SHEET_VIEWS, type ArtworkView, type DesignReference } from "@/lib/upload-ai-sheet";
 
 export const runtime = "nodejs";
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const MIME: Record<string, string> = {
   "image/png": "image/png",
@@ -29,16 +30,46 @@ export async function POST(req: NextRequest) {
 
   const instructionValue = form.get("instruction");
   const instruction = typeof instructionValue === "string" ? instructionValue : "";
+  const genderValue = form.get("gender");
+  const gender = typeof genderValue === "string" ? genderValue : "";
+  const categoryValue = form.get("category");
+  const category = typeof categoryValue === "string" ? categoryValue : "";
 
   try {
-    const { sheet, views } = await generateMissingSheet(references, instruction);
+    const { sheet, views, match } = await generateMissingSheet(references, instruction, { gender, category });
     const encoded: Partial<Record<ArtworkView, string>> = {};
     for (const view of SHEET_VIEWS) {
       const png = views[view];
       if (png) encoded[view] = png.toString("base64");
     }
-    return NextResponse.json({ images: encoded, sheet: sheet.toString("base64") });
+    return NextResponse.json({
+      images: encoded,
+      sheet: sheet.toString("base64"),
+      ...(match
+        ? {
+            style: match.style,
+            query: match.query,
+            matches: match.matches,
+            plan: match.plan,
+            catalog: {
+              ...match.winner,
+              plan: match.plan,
+            },
+          }
+        : {}),
+    });
   } catch (err) {
+    if (err instanceof CatalogMatchError) {
+      return NextResponse.json(
+        {
+          error: err.message,
+          query: err.query,
+          style: null,
+          matches: err.matches,
+        },
+        { status: err.status },
+      );
+    }
     const message = err instanceof Error ? err.message : "Could not generate the other views.";
     console.error("upload-ai-design generate failed:", message);
     const status = message === "MAGNIFIC_API_KEY is not set." ? 503 : 502;

@@ -27,30 +27,6 @@ type Reference = { id: string; file: File; url: string; ready: boolean; source: 
 
 const EMPTY_VIEWS: ViewMap = { front: null, back: null, left: null, right: null };
 
-async function readProofProgress(response: Response, onProgress: (percent: number) => void): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Could not make the proof.");
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let pdf = "";
-  for (;;) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    buffer += decoder.decode(chunk.value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const message = JSON.parse(line) as { progress?: number; pdf?: string; error?: string };
-      if (message.error) throw new Error(message.error);
-      if (typeof message.progress === "number") onProgress(message.progress);
-      if (message.pdf) pdf = message.pdf;
-    }
-  }
-  if (!pdf) throw new Error("Could not make the proof.");
-  return pdf;
-}
-
 const CATEGORIES = [
   "CORPORATE APPAREL",
   "ACCESSORIES",
@@ -98,7 +74,7 @@ export function UploadAiDesignModal() {
   const [gender, setGender] = useState("");
   const [size, setSize] = useState("");
   const [preparing, setPreparing] = useState(false);
-  const [proofProgress, setProofProgress] = useState(0);
+  const [uploaded, setUploaded] = useState(false);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [showingModel, setShowingModel] = useState(false);
   const [makingModel, setMakingModel] = useState(false);
@@ -108,6 +84,7 @@ export function UploadAiDesignModal() {
   const modelToken = useRef(0);
   const modelUrlRef = useRef<string | null>(null);
   const sheetRef = useRef<File | null>(null);
+  const catalogRef = useRef<unknown>(null);
   referencesRef.current = references;
   viewsRef.current = views;
 
@@ -145,6 +122,7 @@ export function UploadAiDesignModal() {
     setReferences([]);
     setViews(EMPTY_VIEWS);
     sheetRef.current = null;
+    catalogRef.current = null;
     clearModel();
   }
 
@@ -162,6 +140,7 @@ export function UploadAiDesignModal() {
     setFileError("");
     setEditNote("");
     setCategory("");
+    setUploaded(false);
     setOpen(true);
   }
 
@@ -239,15 +218,34 @@ export function UploadAiDesignModal() {
     const body = new FormData();
     for (const file of files) body.append("reference", file);
     if (instruction) body.append("instruction", instruction);
+    if (gender) body.append("gender", gender);
+    if (category) body.append("category", category);
     clearModel();
     setGenerating(true);
     setFileError("");
     try {
       const response = await fetch("/api/upload-ai-design/generate", { method: "POST", body });
       const payload = await response.json().catch(() => null);
+      if (typeof payload?.query === "string" && payload.query) {
+        console.log("closest garment query", payload.query);
+      }
       if (!response.ok) {
-        setFileError(typeof payload?.error === "string" ? payload.error : "Could not generate the other views.");
+        const msg = typeof payload?.error === "string" ? payload.error : "Could not generate the other views.";
+        if (response.status === 422) console.log("closest garment", "none —", msg);
+        setFileError(msg);
         return;
+      }
+      if (typeof payload?.style === "string" && payload.style) {
+        console.log("closest garment", payload.style);
+      }
+      if (Array.isArray(payload?.matches)) {
+        console.log("closest garment candidates", payload.matches);
+      }
+      if (payload?.plan) {
+        console.log("closest garment plan", payload.plan);
+      }
+      if (payload?.catalog && typeof payload.catalog === "object") {
+        catalogRef.current = payload.catalog;
       }
       const images = payload?.images ?? {};
       if (typeof payload?.sheet === "string") sheetRef.current = pngFile("sheet", payload.sheet);
@@ -306,6 +304,7 @@ export function UploadAiDesignModal() {
     }
     setViews(EMPTY_VIEWS);
     sheetRef.current = null;
+    catalogRef.current = null;
     setEditNote("");
     clearModel();
   }
@@ -361,38 +360,37 @@ export function UploadAiDesignModal() {
       setFileError("Choose a gender and a size.");
       return;
     }
+    const entered = new FormData(event.currentTarget);
     const body = new FormData();
     body.append("sheet", sheet);
     body.append("gender", fit.gender);
     body.append("size", fit.size);
+    body.append("category", String(entered.get("category") ?? ""));
+    body.append("name", String(entered.get("name") ?? ""));
+    body.append("email", String(entered.get("email") ?? ""));
+    body.append("message", String(entered.get("message") ?? ""));
+    if (catalogRef.current) {
+      body.append("catalog", JSON.stringify(catalogRef.current));
+    }
     setPreparing(true);
-    setProofProgress(0);
     setFileError("");
     try {
       const response = await fetch("/api/upload-ai-design/submit", { method: "POST", body });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        setFileError(typeof payload?.error === "string" ? payload.error : "Could not make the proof.");
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || typeof payload?.jobId !== "string") {
+        setFileError(typeof payload?.error === "string" ? payload.error : "Could not upload the design.");
         return;
       }
-      const pdf = await readProofProgress(response, setProofProgress);
-      const bytes = Uint8Array.from(atob(pdf), (char) => char.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "proof.pdf";
-      link.click();
-      URL.revokeObjectURL(url);
+      setUploaded(true);
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : "Could not make the proof.");
+      setFileError(error instanceof Error ? error.message : "Could not upload the design.");
     } finally {
       setPreparing(false);
-      setProofProgress(0);
     }
   }
 
   const viewCount = VIEWS.filter((view) => views[view.id]).length;
-  const fieldsLocked = viewCount < 4 || isRemovingBackground || generating || preparing;
+  const fieldsLocked = viewCount < 4 || isRemovingBackground || generating || preparing || uploaded;
   const referenceLabel = references.length === 1 ? "1 image" : `${references.length} images`;
 
   if (!open) {
@@ -614,10 +612,18 @@ export function UploadAiDesignModal() {
               </label>
 
               <p className="upload-ai-required"><i>*</i>Required field</p>
-              <button className="upload-ai-submit" type="submit" disabled={preparing}>
-                {preparing ? `Submitting proof ${proofProgress}%` : isRemovingBackground ? "Removing background" : "Upload design"}
-              </button>
+              {uploaded ? null : (
+                <button className="upload-ai-submit" type="submit" disabled={preparing}>
+                  {preparing ? "Uploading" : isRemovingBackground ? "Removing background" : "Upload design"}
+                </button>
+              )}
               </fieldset>
+              {uploaded ? (
+                <p className="upload-ai-submit is-done" role="status">
+                  <span className="upload-ai-tick" aria-hidden="true">✓</span>
+                  Your design was uploaded. You can close this page.
+                </p>
+              ) : null}
             </form>
         </section>
       </div>

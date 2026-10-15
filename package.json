@@ -2,20 +2,22 @@
   "name": "momentec-cdl-express",
   "version": "0.1.0",
   "private": true,
-  "description": "Upload an AI design and download a proof PDF.",
+  "description": "Upload an AI design. The proof PDF is built in AWS and stored in S3.",
   "scripts": {
     "dev": "next dev -p 3200",
     "build": "next build",
     "start": "next start -p 3200",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:proof-job": "node scripts/proof-job.check.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1151.0",
+    "@aws-sdk/client-s3": "^3.1151.0",
     "@google/generative-ai": "^0.21.0",
     "@imgly/background-removal": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "next": "15.5.23",
-    "pdfkit": "^0.20.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "^0.34.5",
@@ -23,10 +25,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@types/pdfkit": "^0.17.6",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "@types/three": "^0.171.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.3"
   },
   "engines": {

@@ -9,9 +9,9 @@ WHAT THE APP DOES
 A customer drops one design photo.
 The app removes the background, then builds front, back, left, and right views of that garment.
 The customer can open a beta 3D view of those four pictures.
-Upload design builds a proof PDF and the browser downloads it. The PDF is the result. It is not saved as an order.
+Upload design stores the sheet and returns immediately. The customer can leave. A Lambda function then reads the sheet, builds the proof PDF, and writes it to a private S3 bucket. The PDF is not downloaded in the browser, and it is not saved as an order.
 
-The button shows "Submitting proof" and a percent while that runs. That wait is only for this proof of concept, so we can demonstrate the PDF being built in front of the customer. In the real product the customer will upload and leave. They will not sit on the button. The proof still waits on Gemini and then on each Magnific image, so in this demo it can take a few minutes. The percent is there so the person watching can see the request is still working and how far along it is, instead of a button that looks stuck. The number moves when a step finishes: reading the sheet, then each image, then building the PDF. It reaches 100 when the file is ready to download.
+The button says "Uploading" only while the sheet is handed to S3. Gemini, Magnific, and the PDF run after that, in Lambda, and can still take a few minutes. The file appears at <job id>/proof.pdf. <job id>/status.json says running, done, or failed.
 
 
 WHAT IS DONE
@@ -20,10 +20,10 @@ WHAT IS DONE
 
 2. One photo becomes a 2x2 sheet: front, back, left, right. Those four views still show on the page. The prompt now asks for a solid garment with depth, turned in 90 degree steps, instead of a flat drawing. A new set of views has to be generated before that change can be judged. Pictures already on screen were made with the older prompt.
 
-3. Upload design does this, in order:
+3. Upload design stores the sheet, gender, size, category, name, email, and message, then starts the Lambda function. The function does this, in order:
    - Gemini reads the 2x2 sheet and lists team marks and roster marks (player name and number), plus garment fill colors.
    - Magnific redraws the front and the back, and redraws each mark on a white background.
-   - Those images are built into the proof PDF in memory and sent back as a download.
+   - Those images are built into the proof PDF and written to S3.
    The side-view pictures are not put in the PDF, and they are not generated again for the proof. Sleeve marks still come from the sheet.
 
 4. Magnific image edits for the proof run in two waves. The first half run together, then the second half. This is faster than one pair at a time. Starting every edit at once was failing with a Magnific credit error.
@@ -52,10 +52,10 @@ Measurements.
 Gender and Size on the form are sent with the four-view picture. Gemini returns where each mark sits as a fraction of the garment, and inch sizes graded for that gender and size. Those inches are drawn on the decoration row when they come back. If Gemini leaves them out, the row stays on the red 1.5 inch line and zero offsets.
 
 Customer form.
-Category, name, email, and message are collected on the page. They are not written into the PDF. Gender and Size are sent to Gemini. They are also written on the garment size line and the roster top size.
+Category, name, email, and message are stored with the job in S3. They are not written into the PDF. Gender and Size are sent to Gemini. They are also written on the garment size line and the roster top size.
 
-Vercel free plan.
-Proof PDF generation can fail on a Vercel Hobby (free) account. The proof waits on Gemini and then on many Magnific image edits. That work can run longer than the free plan allows for one request, so Upload design can error even when the same flow succeeds elsewhere.
+AWS.
+The live account, region, functions, bucket layout, and who is allowed to call each one are written in docs/aws.md. The proof function is the lambda/ folder, in TypeScript, and it does not import this website. The catalog search is a separate function built from Momentec_VectorEmbeddings. The Next server uses its own app key and only starts the proof function. The upload request itself no longer waits on Gemini or Magnific.
 
 
 HARDCODED VALUES TO REPLACE

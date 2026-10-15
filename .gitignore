@@ -1,4 +1,5 @@
 node_modules/
+dist/
 .next/
 out/
 .env
@@ -23,3 +24,5 @@ graphify-out/*
 scratch/*
 assets/upload-ai-design/
 assets/user-uploaded/
+Momentec_VectorEmbeddings/
+lambda/

@@ -280,7 +280,7 @@ async function pollUpscale(apiKey: string, taskId: string): Promise<string> {
   throw new Error("image-upscaler task did not complete within the timeout.");
 }
 
-const GPT_EDIT_POLL_MS = 150_000;
+const GPT_EDIT_POLL_MS = 300_000;
 
 export async function generateGptImageSheet(
   prompt: string,
