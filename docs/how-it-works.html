@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Design upload flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #14202b;
+      --muted: #5c6770;
+      --line: #d3dce3;
+      --bg: #eef3f6;
+      --card: #fff;
+      --accent: #1a78c2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    main { max-width: 880px; margin: 0 auto; padding: 36px 18px 72px; }
+    h1 { margin: 0 0 6px; font-size: 28px; }
+    .lede { margin: 0 0 28px; color: var(--muted); }
+    .step { position: relative; margin: 0 0 28px; }
+    .step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: 22px;
+      bottom: -28px;
+      width: 2px;
+      height: 28px;
+      background: var(--accent);
+    }
+    .box {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .box h2 {
+      margin: 0;
+      padding: 12px 16px;
+      background: #123;
+      color: #fff;
+      font-size: 16px;
+    }
+    .box h2 span { color: #8ec8f0; font-weight: 500; margin-right: 8px; }
+    dl { margin: 0; }
+    dt {
+      margin: 0;
+      padding: 8px 16px 0;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    dd { margin: 4px 16px 10px; }
+    pre {
+      margin: 6px 0 0;
+      padding: 10px 12px;
+      background: #f6f8fa;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: auto;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .stop { border-color: #e10600; }
+    .stop h2 { background: #7a120c; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Design upload, end to end</h1>
+    <p class="lede">One photo in. Four views of a real Momentec style. A proof PDF in private storage. The customer leaves after Upload. They do not wait for the PDF.</p>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>1</span>Website</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>One design photo (jpg, png, or webp). Sport, gender, and size if the form already has them.</dd>
+          <dt>Prompt or call</dt>
+          <dd>None. The page sends the photo to the next step when the customer clicks Make the four views.</dd>
+          <dt>Out</dt>
+          <dd>The same photo, forwarded.</dd>
+          <dt>Example</dt>
+          <dd>A short-sleeve crew jersey photo with a chest wordmark and a number.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>2</span>Gemini, first call</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>The uploaded photo.</dd>
+          <dt>Prompt or call</dt>
+          <dd>DESCRIBE_PROMPT. It lists the catalog’s real product names (Crew Neck Baseball Jersey, Traditional Track Jersey, Basketball Shorts, and so on) and asks for JSON only. A one-piece singlet, dress, or similar cut must come back as not supported.</dd>
+          <dt>Out</dt>
+          <dd>JSON: supported, up to three catalog queries, sleeve cut, segment, visible logo places, visible text places, button flag, color-panel count.</dd>
+          <dt>Example, reject</dt>
+          <dd><pre>{
+  "supported": false,
+  "unsupported_reason": "Momentec does not manufacture one-piece wrestling singlets."
+}</pre></dd>
+          <dt>Example, pass</dt>
+          <dd><pre>{
+  "supported": true,
+  "queries": ["Turbo Training Tee", "Crew Neck Baseball Jersey", "Volleyball Tee"],
+  "garment_piece": "top",
+  "sleeves": "short",
+  "segment": "adult",
+  "logo_locations": ["Front Center Full"],
+  "text_locations": ["Front Center"],
+  "has_buttons": false,
+  "color_panels": 1
+}</pre></dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box stop">
+        <h2>Stop</h2>
+        <dl>
+          <dt>When</dt>
+          <dd>supported is false.</dd>
+          <dt>Out</dt>
+          <dd>The page shows the reason. No catalog search, no Magnific call, no PDF.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>3</span>Catalog search</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>Each query from step 2. Products only. Optional sport and adult / youth / ladies filter from the form.</dd>
+          <dt>Prompt or call</dt>
+          <dd><pre>POST /search
+{
+  "query": "Crew Neck Baseball Jersey",
+  "top_k": 12,
+  "collections": ["products"],
+  "group_products_by_style": true
+}</pre></dd>
+          <dt>Out</dt>
+          <dd>Ranked styles. Each row has style, name, brand, sport, segment, score, logo_locations (code + name), text_locations (code, name, allowed inch heights), color_zones.</dd>
+          <dt>Example</dt>
+          <dd><pre>{
+  "style": "228137",
+  "name": "FreeStyle Sublimated Turbo Crew Neck Baseball Jersey",
+  "brand": "Holloway",
+  "sport": "BASEBALL",
+  "text_locations": [{ "code": "t2", "name": "Front Center", "params": ["2", "4"] }],
+  "color_zones": [{ "code": "SUB_FIRST_BODY_COLOR", "name": "Body Color" }]
+}</pre></dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>4</span>Momentec garment images</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>The top distinct style numbers from step 3.</dd>
+          <dt>Prompt or call</dt>
+          <dd>Four GETs per style. The style and the view are appended after preview-.</dd>
+          <dt>Out</dt>
+          <dd>Blank front, back, left, and right 3D renders, composed into one 2x2 sheet (front, back, left, right) with a white cross between the cells.</dd>
+          <dt>Example</dt>
+          <dd><pre>preview-228137_front
+preview-228137_back
+preview-228137_left
+preview-228137_right</pre></dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>5</span>Gemini, second call + catalog placement filter &amp; color snap</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>Image 1 is the customer photo. Then up to three 2x2 candidate sheets, each labeled with that style’s name, brand, allowed <code>logo_locations</code>, allowed <code>text_locations</code>, and <code>color_zones</code>.</dd>
+          <dt>Prompt or call</dt>
+          <dd>
+            1. <code>JUDGE_AND_PLAN_PROMPT</code>: pick the style whose cut matches (or set <code>supported: false</code>). Map the upload onto <strong>only</strong> the winning style’s allowed <code>color_zones</code>, <code>logo_locations</code>, and <code>text_locations</code>, with a 6-digit <code>#RRGGBB</code> hex code on every color. Any logo, wordmark, or number sitting on a placement the winning style does not support is omitted.<br>
+            2. <code>filterPlanToAllowedCatalog</code>: strips any entry in <code>colorZoneMapping</code>, <code>logoMapping</code>, or <code>textMapping</code> that does not match an active catalog code or name on the winning style.<br>
+            3. <code>snapPlanColors</code> → <code>POST /colors/nearest</code> (with local CIE Lab ΔE fallback over the 173 Momentec brand colors): snaps every <code>#RRGGBB</code> hex in the plan to the closest solid Momentec color for the winning style’s brand (skipping tonal/camo chips) and rewrites the plan with official Momentec color names and hex codes.
+          </dd>
+          <dt>Out</dt>
+          <dd>Winning style (or a 422 rejection), plus <code>color_zone_mapping</code>, <code>logo_mapping</code>, <code>text_mapping</code>, and <code>view_plan</code> restricted to supported catalog locations and snapped to official Momentec brand colors.</dd>
+          <dt>Example</dt>
+          <dd><pre>{
+  "supported": true,
+  "style": "228137",
+  "color_zone_mapping": [
+    "Body Color (SUB_FIRST_BODY_COLOR): PURPLE (#2A0A5F)",
+    "Accent 1 (SUB_FIRST_ACCENT_1): SCARLET (#A31F2D)"
+  ],
+  "logo_mapping": [
+    "Upper Left Chest (m6): shield crest in WHITE (#FFFFFF) and SCARLET (#A31F2D) on front view"
+  ],
+  "text_mapping": [
+    "Front Center (t2): TIGERS in BRIGHT YELLOW (#FFF327) outlined in BLACK (#000000)",
+    "Front Center (t2): 24 in BRIGHT YELLOW (#FFF327) under the word"
+  ],
+  "view_plan": {
+    "front": "PURPLE (#2A0A5F) body with SCARLET (#A31F2D) accents, m6 chest crest, and t2 TIGERS / 24.",
+    "back": "PURPLE (#2A0A5F) body. Leave back clean.",
+    "left": "PURPLE (#2A0A5F) sleeve and SCARLET (#A31F2D) side panel. Omit unsupported sleeve patch.",
+    "right": "PURPLE (#2A0A5F) sleeve and SCARLET (#A31F2D) side panel."
+  }
+}</pre></dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>6</span>Magnific</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>Image 1: the winning style’s 2x2 template. Image 2: the customer photo. The prompt includes the filtered placements and snapped Momentec color mappings from step 5.</dd>
+          <dt>Prompt or call</dt>
+          <dd><code>buildCatalogProjectionPrompt</code> → Magnific <code>gpt-image-2-edit</code>. Keep Image 1’s exact 3D silhouette, collar, sleeves, buttons, hem, and 2x2 layout. Paint every fabric zone, trim, logo, and text using the snapped Momentec <code>#RRGGBB</code> hex codes instead of copying raw shades from Image 2. Render <strong>only</strong> the logos and text/numbers listed in the allowed catalog placements; any mark on Image 2 at an unsupported placement is left blank.</dd>
+          <dt>Out</dt>
+          <dd>One 2x2 PNG rendered in the closest manufacturable Momentec colors and allowed placements. The site splits it on the white cross into front, back, left, and right, and shows those four views to the customer.</dd>
+          <dt>Example</dt>
+          <dd>A V-neck template comes back as four views of that exact cut, painted in the snapped Momentec brand hexes, with only the catalog-supported front chest markings applied.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>7</span>Upload</h2>
+        <dl>
+          <dt>In</dt>
+          <dd>The finished 2x2 sheet, customer name, email, sport, gender, size, optional comment, and the matched <code>catalog</code> payload (style, brand, <code>logo_locations</code>, <code>text_locations</code>, <code>color_zones</code>, and the snapped <code>plan</code>).</dd>
+          <dt>Prompt or call</dt>
+          <dd>Write <code>&lt;jobId&gt;/sheet.png</code> and <code>&lt;jobId&gt;/job.json</code> to S3, then invoke <code>momentec-cdl-proof</code> asynchronously (<code>InvocationType: "Event"</code>). The HTTP request returns <code>202 Accepted</code> immediately.</dd>
+          <dt>Out</dt>
+          <dd>A job id. The page confirms the upload and the customer can close the modal.</dd>
+          <dt>Example</dt>
+          <dd><pre>{ "jobId": "859ce71d-29cb-42d4-a57d-fc70b7a198fb" }</pre></dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="step">
+      <article class="box">
+        <h2><span>8</span>Proof job (AWS Lambda)</h2>
+        <dl>
+          <dt>In</dt>
+          <dd><code>&lt;jobId&gt;/sheet.png</code> and <code>&lt;jobId&gt;/job.json</code> (gender, size, and the matched style’s brand, <code>logo_locations</code>, <code>text_locations</code>, <code>color_zones</code>, and snapped <code>plan</code>).</dd>
+          <dt>Prompt or call</dt>
+          <dd>Gemini (<code>DECORATION_LIST_PROMPT</code>) reads the sheet against the style’s official catalog zones and locations. Code drops any fill zone or decoration mark that is not in the style’s allowed <code>color_zones</code>, <code>logo_locations</code>, or <code>text_locations</code>, snaps mark heights to the location’s allowed inch <code>params</code>, and snaps every fill and ink hex to the official Momentec brand color (<code>POST /colors/nearest</code> with local CIE Lab ΔE fallback). Magnific then isolates the front view, back view, and each allowed mark on white.</dd>
+          <dt>Out</dt>
+          <dd>A private PDF at <code>&lt;jobId&gt;/proof.pdf</code> in S3. Page 1: order summary, front and back views, garment info, and snapped fill colors per catalog zone. Next: team/company decoration and roster decoration (official location name + code, isolated mark, snapped Momentec ink swatches, and snapped inch dimensions). Last: roster line and customer comments.</dd>
+          <dt>Example</dt>
+          <dd><pre>FILL COLORS
+BODY COLOR: SCARLET
+ACCENT 1: ROYAL
+
+TEAM/COMPANY DECORATION
+FRONT CENTER FULL SUBLIMATION
+LOC: M2
+ART HEIGHT: 4.1 INCH    ART WIDTH: 7 INCH
+
+ROSTER DECORATION
+BACK CENTER SUBLIMATION NUMBER
+LOC: T7
+SENTINEL: 8 INCH</pre>
+          <p>The style number printed on the PDF is still the sample 228435. The matched style is used for places and colors. Wiring that number onto the PDF is not done yet. Order number, artist, and the long sample comment are also still placeholders.</p></dd>
+        </dl>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

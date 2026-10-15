@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { filterPlanToAllowedCatalog, replaceSnappedColors, snapToBrandColorLocal } from "./colors";
 import { parseStoredProofJob, proofObjectKeys, readProofCatalog, readProofCustomer } from "./proof-job";
 
 const jobId = "11111111-1111-4111-8111-111111111111";
@@ -49,5 +50,44 @@ const catalog = readProofCatalog(
 );
 assert.equal(catalog?.style, "228137");
 assert.equal(catalog?.text_locations?.[0]?.params?.[0], "6");
+
+const snappedRed = snapToBrandColorLocal({ name: "#A8182E", hex: "#A8182E" }, "Holloway");
+assert.equal(snappedRed.name, "SCARLET");
+assert.equal(snappedRed.hex, "#A31F2D");
+
+const hexMap = new Map([
+  ["#A8182E", snappedRed],
+  ["#4B1D70", snapToBrandColorLocal({ name: "#4B1D70", hex: "#4B1D70" }, "Holloway")],
+]);
+assert.equal(
+  replaceSnappedColors("Body Color (SUB_FIRST_BODY_COLOR): deep purple (#4B1D70) with crimson red #A8182E trim", hexMap),
+  "Body Color (SUB_FIRST_BODY_COLOR): PURPLE (#2A0A5F) with SCARLET (#A31F2D) trim",
+);
+
+const filteredPlan = filterPlanToAllowedCatalog(
+  {
+    colorZoneMapping: [
+      "Body Color (SUB_FIRST_BODY_COLOR): WHITE (#FFFFFF)",
+      "Fake Piping (SUB_FAKE_PIPING): BLACK (#000000)",
+    ],
+    logoMapping: [
+      "Front Center Full (m2): Tiger crest on front",
+      "Left Short Sleeve (m10): Sleeve patch on left view",
+    ],
+    textMapping: [
+      "Back Center (t7): 24 in SCARLET (#A31F2D)",
+      "Left Sleeve Text (t55): TIGERS on sleeve",
+    ],
+    viewPlan: { front: "front", back: "back", left: "left", right: "right" },
+  },
+  {
+    logo_locations: [{ code: "m2", name: "Front Center Full", legacy: false }],
+    text_locations: [{ code: "t7", name: "Back Center", legacy: false }],
+    color_zones: [{ code: "SUB_FIRST_BODY_COLOR", name: "Body Color" }],
+  },
+);
+assert.deepEqual(filteredPlan.colorZoneMapping, ["Body Color (SUB_FIRST_BODY_COLOR): WHITE (#FFFFFF)"]);
+assert.deepEqual(filteredPlan.logoMapping, ["Front Center Full (m2): Tiger crest on front"]);
+assert.deepEqual(filteredPlan.textMapping, ["Back Center (t7): 24 in SCARLET (#A31F2D)"]);
 
 console.log("proof-job check ok");

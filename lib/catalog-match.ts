@@ -1,6 +1,7 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import sharp from "sharp";
+import { filterPlanToAllowedCatalog, snapPlanColors } from "./colors";
 
 // WSL drops the catalog connection when Node's address attempt is only 250ms.
 setDefaultAutoSelectFamilyAttemptTimeout(10_000);
@@ -53,11 +54,12 @@ Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Botto
 Your task has two parts:
 1. Pick the single candidate catalog style that best matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem) and supports the customer garment's placements and color zones.
    If NONE of the candidate catalog styles match the physical construction of Image 1 (for example, Image 1 is a one-piece singlet/bodysuit/dress or a completely different garment cut than all candidates), set "supported": false and explain why in "unsupported_reason".
-2. For the winning catalog style, map the customer's uploaded design onto that catalog garment's allowed color_zones, allowed logo_locations, and allowed text_locations so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
-   - In "color_zone_mapping", assign each color zone of the winning style (such as Body Color, Accent 1, Accent 2, Button Color, Collar/Trim) to the exact color, gradient, or sublimation pattern visible on the customer's garment (include hex codes or clear color descriptions).
-   - In "logo_mapping", map each visible logo/crest/patch/graphic on the customer's garment to one of the winning style's allowed logo_locations (include the location code and name, what the logo looks like, and which view it sits on). Do not invent logos that are not in Image 1.
-   - In "text_mapping", map each visible wordmark/name/number on the customer's garment to one of the winning style's allowed text_locations (include the location code and name, the exact text/number and color/font style, and which view it sits on). Do not invent text that is not in Image 1.
-   - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape.
+2. For the winning catalog style, map the customer's uploaded design onto ONLY that catalog garment's allowed color_zones, allowed logo_locations, and allowed text_locations so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
+   - In "color_zone_mapping", assign ONLY the color zones that exist in the winning style's color_zones list (such as Body Color, Accent 1, Accent 2, Button Color, Collar/Trim) to the color, gradient, or sublimation pattern visible on the customer's garment (always include a 6-digit #RRGGBB hex code for every color). Omit any color panel that does not exist on the winning style.
+   - In "logo_mapping", include a logo/crest/patch/graphic ONLY if the winning style's allowed logo_locations list supports the physical placement where that logo appears on the customer's garment (include the exact location code and name from the winning style's allowed logo_locations, what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on). If a logo appears on a placement NOT in the winning style's allowed logo_locations, OMIT it completely — do not move it to another location and do not invent logos.
+   - In "text_mapping", include a wordmark/name/number ONLY if the winning style's allowed text_locations list supports the physical placement where that text/number appears on the customer's garment (include the exact location code and name from the winning style's allowed text_locations, the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on). If text or a number appears on a placement NOT in the winning style's allowed text_locations, OMIT it completely — do not move it to another location and do not invent text.
+   - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention ONLY the logos and text/numbers that were kept in "logo_mapping" and "text_mapping". If any visible logo, text, or number on Image 1 sits on an unsupported placement for the winning style, explicitly state in that view's plan to leave that area clean/blank and omit that mark.
+   - Color formatting rule: whenever you reference any color in "color_zone_mapping", "logo_mapping", "text_mapping", or "view_plan", always include its 6-digit "#RRGGBB" hex code (for example, "purple (#4B1D70)") so every color can be snapped to the manufacturer's official brand palette before rendering.
 
 Reply with ONLY valid JSON in this exact shape:
 {
@@ -206,6 +208,8 @@ export async function matchCatalogGarment(
   }
 
   const chosen = comparable.find((item) => item.row.style === judged.style) ?? comparable[0];
+  const filteredPlan = filterPlanToAllowedCatalog(judged.plan, chosen.row);
+  const snappedPlan = await snapPlanColors(filteredPlan, chosen.row.brand);
   console.log(
     "closest garment",
     chosen.row.style,
@@ -218,7 +222,7 @@ export async function matchCatalogGarment(
       color_zones: row.color_zones,
     })),
   );
-  console.log("closest garment plan", judged.plan);
+  console.log("closest garment plan", snappedPlan);
 
   return {
     query,
@@ -226,7 +230,7 @@ export async function matchCatalogGarment(
     winner: chosen.row,
     templateSheet: chosen.sheet,
     matches,
-    plan: judged.plan,
+    plan: snappedPlan,
   };
 }
 

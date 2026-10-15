@@ -32,12 +32,24 @@ export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenc
   const logoLines =
     match.plan.logoMapping.length > 0
       ? match.plan.logoMapping.map((line) => `  - ${line}`).join("\n")
-      : "  - Place only logos/crests that are visibly present on the customer's uploaded design in their matching catalog locations.";
+      : "  - NONE (do NOT place any logos, crests, patches, or graphics anywhere on the garment, even if present on Image 2).";
 
   const textLines =
     match.plan.textMapping.length > 0
       ? match.plan.textMapping.map((line) => `  - ${line}`).join("\n")
-      : "  - Place only text/wordmarks/numbers that are visibly present on the customer's uploaded design in their matching catalog locations.";
+      : "  - NONE (do NOT place any text, wordmarks, names, or numbers anywhere on the garment, even if present on Image 2).";
+
+  const allowedLogoList =
+    match.winner.logo_locations
+      .filter((l) => !l.legacy && (l.name || l.code))
+      .map((l) => (l.code && l.name ? `${l.name} (${l.code})` : l.name || l.code))
+      .join(", ") || "none";
+
+  const allowedTextList =
+    match.winner.text_locations
+      .filter((t) => !t.legacy && (t.name || t.code))
+      .map((t) => (t.code && t.name ? `${t.name} (${t.code})` : t.name || t.code))
+      .join(", ") || "none";
 
   return `Project the customer's custom garment design onto the exact 2x2 3D catalog garment template shown in Image 1.
 
@@ -51,6 +63,16 @@ export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenc
 Critical shape & construction rules (MUST follow Image 1):
 - Keep the EXACT 3D garment silhouette, collar/neckline cut, sleeve cut & length, button placket (if present in Image 1), hem shape, 3D volume, camera angles, scale, and 2x2 cell positions of Image 1.
 - Do NOT alter the garment cut to match Image 2 if Image 2 has a different collar, sleeve, or hem. Image 1 is the only manufacturable garment shape.
+
+Critical color rules (MUST follow the snapped Momentec catalog hex codes below):
+- Every color in the specification below has already been matched to the closest manufacturable Momentec brand color and #RRGGBB hex code for style ${match.style} (${match.winner.brand || "Momentec"}).
+- Paint every fabric color zone, collar/trim, button, logo, wordmark, and number using the exact Momentec color name and #RRGGBB hex code listed below — even if Image 2 shows a different raw shade or hue. Do NOT copy unsnapped shades from Image 2 when a Momentec hex code is specified below.
+
+Critical placement rules (ONLY supported catalog locations for style ${match.style} may be decorated):
+- Style ${match.style} ONLY supports these logo locations: ${allowedLogoList}.
+- Style ${match.style} ONLY supports these text/number locations: ${allowedTextList}.
+- Render ONLY the logos listed under "Allowed logo placements to apply" and ONLY the text/numbers listed under "Allowed text/number placements to apply" below.
+- If Image 2 has any logo, patch, graphic, wordmark, name, or number on a placement that is NOT explicitly listed below, DO NOT draw it — leave that area of the garment completely blank/clean fabric.
 
 Catalog color-zone & decoration placement specification (mapped from the customer's design onto style ${match.style}):
 - Color zones:
