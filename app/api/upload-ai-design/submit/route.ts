@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { NextRequest } from "next/server";
 import { readGarmentFit } from "@/lib/mark-measure";
-import { proofObjectKeys, readProofCatalog, readProofCustomer, type ProofJob } from "@/lib/proof-job";
+import { newProofJobId, proofObjectKeys, readProofCatalog, readProofCustomer, type ProofJob } from "@/lib/proof-job";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,7 +36,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Could not upload the design." }, { status: 503 });
   }
 
-  const jobId = randomUUID();
+  const jobId = newProofJobId();
   const keys = proofObjectKeys(jobId);
   const catalog = readProofCatalog(form.get("catalog"));
   const job: ProofJob = { jobId, ...fit, ...customer, ...(catalog ? { catalog } : {}) };

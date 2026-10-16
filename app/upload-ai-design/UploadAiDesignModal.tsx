@@ -43,6 +43,7 @@ export function UploadAiDesignModal() {
   const [references, setReferences] = useState<Reference[]>([]);
   const [views, setViews] = useState<ViewMap>(EMPTY_VIEWS);
   const [fileError, setFileError] = useState("");
+  const [limitNote, setLimitNote] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [processing, setProcessing] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
@@ -103,6 +104,7 @@ export function UploadAiDesignModal() {
     setViews(EMPTY_VIEWS);
     categoryTouched.current = false;
     genderTouched.current = false;
+    setLimitNote("");
     sheetRef.current = null;
     templateRef.current = null;
     catalogRef.current = null;
@@ -118,6 +120,7 @@ export function UploadAiDesignModal() {
     templateRef.current = null;
     catalogRef.current = null;
     setEditNote("");
+    setLimitNote("");
     clearModel();
   }
 
@@ -254,6 +257,7 @@ export function UploadAiDesignModal() {
     clearModel();
     setGenerating(true);
     setFileError("");
+    setLimitNote("");
     try {
       const response = await fetch("/api/upload-ai-design/generate", { method: "POST", body });
       const payload = await response.json().catch(() => null);
@@ -264,8 +268,10 @@ export function UploadAiDesignModal() {
         const msg = typeof payload?.error === "string" ? payload.error : "Could not generate the other views.";
         if (response.status === 422) console.log("closest garment", "none —", msg);
         setFileError(msg);
+        setLimitNote("");
         return;
       }
+      if (typeof payload?.limits === "string") setLimitNote(payload.limits);
       if (typeof payload?.style === "string" && payload.style) {
         console.log("closest garment", payload.style);
       }
@@ -544,6 +550,7 @@ export function UploadAiDesignModal() {
                 </div>
                 )
               ) : null}
+              {limitNote && viewCount === 4 && !showingModel ? <p className="upload-ai-limit">{limitNote}</p> : null}
               {viewCount === 4 && !showingModel ? (
                 <div className="upload-ai-edit">
                   <label>

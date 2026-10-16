@@ -15,7 +15,7 @@ export async function completeJson(apiKey: string, name: string, schema: JsonSch
   const client = new OpenAI({ apiKey });
   const completion = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-6-sol",
-    reasoning_effort: "none",
+    reasoning_effort: "low",
     response_format: {
       type: "json_schema",
       json_schema: {

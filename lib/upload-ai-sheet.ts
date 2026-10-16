@@ -239,7 +239,7 @@ export function readEditMatch(raw: string, template: Buffer): CatalogMatchResult
     text_locations: itemList<LocationItem>(record.text_locations),
     color_zones: itemList<ZoneItem>(record.color_zones),
   };
-  return { query: "", style, winner, templateSheet: template, matches: [winner], plan: projection };
+  return { query: "", style, winner, templateSheet: template, matches: [winner], plan: projection, limits: "" };
 }
 
 function textList(value: unknown): string[] {

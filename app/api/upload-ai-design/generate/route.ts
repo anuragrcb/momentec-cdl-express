@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
             query: match.query,
             matches: match.matches,
             plan: match.plan,
+            limits: match.limits,
             template: match.templateSheet.toString("base64"),
             catalog: {
               ...match.winner,

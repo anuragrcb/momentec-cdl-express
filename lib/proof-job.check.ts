@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { filterPlanToAllowedCatalog, replaceSnappedColors, snapToBrandColorLocal } from "./colors";
+import { coversPlacements, customerLimitNote } from "./manufacture-limits";
 import { readGarmentSuggestion } from "./mark-measure";
 import { matchNeedsReview } from "./match-decision";
 import { parseStoredProofJob, proofObjectKeys, readProofCatalog, readProofCustomer } from "./proof-job";
@@ -8,6 +9,8 @@ const jobId = "11111111-1111-4111-8111-111111111111";
 const keys = proofObjectKeys(jobId);
 assert.equal(keys.sheet, `${jobId}/sheet.png`);
 assert.equal(keys.pdf, `${jobId}/proof.pdf`);
+const stamped = "job-2026-10-16T15-30-45Z_11111111-1111-4111-8111-111111111111";
+assert.equal(proofObjectKeys(stamped).sheet, `${stamped}/sheet.png`);
 assert.throws(() => proofObjectKeys("../secrets"), /Bad job id/);
 
 const customer = readProofCustomer({
@@ -98,5 +101,15 @@ assert.equal(matchNeedsReview("228137", 0.59, ["228137"]), true);
 assert.equal(matchNeedsReview("228137", 0.6, ["228137"]), false);
 assert.deepEqual(readGarmentSuggestion("BASEBALL", "Women"), { category: "BASEBALL", gender: "Women" });
 assert.equal(readGarmentSuggestion("CRICKET", "Men"), null);
+assert.equal(coversPlacements(["Front Center Full"], ["Upper Left Chest"]), 0);
+assert.equal(coversPlacements(["Front Center Full"], ["Front Center Full"]), 1);
+assert.equal(customerLimitNote([], ["Upper left chest logo"]), "We made this with Upper left chest logo.");
+assert.equal(
+  customerLimitNote(
+    [{ mark: "the small label at the front hem", reason: "Style 228350 has no place for a logo there (m2)" }],
+    ["the Hays Sluggers logo on the front (m2)"],
+  ),
+  "We made this with the Hays Sluggers logo on the front.\nWe couldn't add the small label at the front hem. This style has no place for a logo there.",
+);
 
 console.log("proof-job check ok");

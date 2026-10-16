@@ -1,6 +1,7 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import sharp from "sharp";
 import { filterPlanToAllowedCatalog, snapPlanColors } from "./colors";
+import { coversPlacements, customerLimitNote, isTrimTag, type PrintLimit } from "./manufacture-limits";
 import { matchNeedsReview } from "./match-decision";
 import { completeJson, type JsonSchema } from "./openai-json";
 
@@ -54,14 +55,15 @@ const JUDGE_AND_PLAN_PROMPT = `Image 1 is the customer's uploaded garment design
 Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Bottom-Left: Left side, Bottom-Right: Right side) of one candidate Momentec catalog style, accompanied by its catalog name, allowed logo placements, allowed text placements, and color zones.
 
 Your task has two parts:
-1. Pick the single candidate catalog style that best matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem) and supports the customer garment's placements and color zones.
+1. Pick the closest candidate catalog style that matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem) and can print the customer's visible logos and text. If the closest cut cannot print those marks, choose the next closest candidate that can.
    If NONE of the candidate catalog styles match the physical construction of Image 1 (for example, Image 1 is a one-piece singlet/bodysuit/dress or a completely different garment cut than all candidates), set "supported": false and explain why in "unsupported_reason".
 2. For the winning catalog style, map the customer's uploaded design onto ONLY that catalog garment's allowed color_zones, allowed logo_locations, and allowed text_locations so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
    - In "color_zone_mapping", assign ONLY the color zones that exist in the winning style's color_zones list (such as Body Color, Accent 1, Accent 2, Button Color, Collar/Trim) to the color, gradient, or sublimation pattern visible on the customer's garment (always include a 6-digit #RRGGBB hex code for every color). Omit any color panel that does not exist on the winning style.
-   - In "logo_mapping", include a logo/crest/patch/graphic ONLY if the winning style's allowed logo_locations list supports the physical placement where that logo appears on the customer's garment (include the exact location code and name from the winning style's allowed logo_locations, what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on). If a logo appears on a placement NOT in the winning style's allowed logo_locations, OMIT it completely — do not move it to another location and do not invent logos.
-   - In "text_mapping", include a wordmark/name/number ONLY if the winning style's allowed text_locations list supports the physical placement where that text/number appears on the customer's garment (include the exact location code and name from the winning style's allowed text_locations, the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on). If text or a number appears on a placement NOT in the winning style's allowed text_locations, OMIT it completely — do not move it to another location and do not invent text.
+   - In "logo_mapping", include a logo/crest/patch/graphic ONLY if the winning style's allowed logo_locations list supports the physical placement where that logo appears on the customer's garment (include the exact location code and name from the winning style's allowed logo_locations, what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on). A logo that has lettering inside it is one logo. Keep the words and the picture together. Do not file the words as text and the picture as a separate graphic. If a logo appears on a placement NOT in the winning style's allowed logo_locations, OMIT the whole logo — do not move it to another location and do not invent logos.
+   - In "text_mapping", include a wordmark/name/number ONLY if it is separate from a logo and the winning style's allowed text_locations list supports that placement (include the exact location code and name from the winning style's allowed text_locations, the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on). Do not repeat words that are already part of a logo. If text or a number appears on a placement NOT in the winning style's allowed text_locations, OMIT it completely — do not move it to another location and do not invent text.
    - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention ONLY the logos and text/numbers that were kept in "logo_mapping" and "text_mapping". If any visible logo, text, or number on Image 1 sits on an unsupported placement for the winning style, explicitly state in that view's plan to leave that area clean/blank and omit that mark.
    - Color formatting rule: whenever you reference any color in "color_zone_mapping", "logo_mapping", "text_mapping", or "view_plan", always include its 6-digit "#RRGGBB" hex code (for example, "purple (#4B1D70)") so every color can be snapped to the manufacturer's official brand palette before rendering.
+   - "not_possible" and "can_do" are shown to the customer. Write them in plain words a customer understands. Say what mark is left off and why, and what will still be printed. A logo and the lettering inside it are one mark. Do not say the words can be printed and the picture cannot. Do not include style numbers or location codes such as m2 or t22. Leave "not_possible" empty when nothing visible is left off.
 
 Reply with ONLY valid JSON in this exact shape:
 {
@@ -72,6 +74,10 @@ Reply with ONLY valid JSON in this exact shape:
   "color_zone_mapping": [],
   "logo_mapping": [],
   "text_mapping": [],
+  "not_possible": [
+    { "mark": "...", "reason": "..." }
+  ],
+  "can_do": ["..."],
   "view_plan": {
     "front": "...",
     "back": "...",
@@ -128,6 +134,7 @@ export type CatalogMatchResult = {
   templateSheet: Buffer;
   matches: MatchRow[];
   plan: GarmentProjectionPlan;
+  limits: string;
 };
 
 export class CatalogMatchError extends Error {
@@ -161,8 +168,7 @@ export async function matchCatalogGarment(
   const query = analysis.queries.join(" | ");
   if (!analysis.supported) {
     const reason =
-      analysis.unsupportedReason ||
-      "We cannot manufacture this garment type because it does not match any style in our catalog.";
+      analysis.unsupportedReason || "This garment is not possible to manufacture.";
     console.log("closest garment query", query || reason);
     console.log("closest garment", "none (unsupported)", reason);
     throw new CatalogMatchError(reason, 422, query, []);
@@ -205,13 +211,32 @@ export async function matchCatalogGarment(
     throw new CatalogMatchError(reason, 422, query, matches);
   }
 
-  const chosen = comparable.find((item) => item.row.style === judged.style);
+  let chosen = comparable.find((item) => item.row.style === judged.style);
   if (!chosen) {
     const reason = "An artist needs to review this design before we can make it.";
     console.log("closest garment", "none (unmatched)", reason);
     throw new CatalogMatchError(reason, 422, query, matches);
   }
-  const filteredPlan = filterPlanToAllowedCatalog(judged.plan, chosen.row);
+  let planSource = judged;
+  const picked = chosen;
+  const missedRealMarks = judged.notPossible.some((item) => !isTrimTag(`${item.mark} ${item.reason}`));
+  if (missedRealMarks) {
+    const winnerScore = placementCoverage(picked.row, analysis);
+    const better = comparable
+      .filter((item) => item.row.style !== picked.row.style)
+      .map((item) => ({ item, score: placementCoverage(item.row, analysis) }))
+      .filter((item) => item.score > winnerScore)
+      .sort((a, b) => b.score - a.score)[0];
+    if (better) {
+      console.log("closest garment retry", better.item.row.style, better.score, "vs", winnerScore);
+      const retry = await chooseStyleAndPlan(openaiKey, photoBytes, mimeType, analysis, [better.item]);
+      if (retry.style === better.item.row.style) {
+        chosen = better.item;
+        planSource = retry;
+      }
+    }
+  }
+  const filteredPlan = filterPlanToAllowedCatalog(planSource.plan, chosen.row);
   const snappedPlan = await snapPlanColors(filteredPlan, chosen.row.brand);
   console.log(
     "closest garment",
@@ -225,7 +250,9 @@ export async function matchCatalogGarment(
       color_zones: row.color_zones,
     })),
   );
+  const limits = customerLimitNote(planSource.notPossible, planSource.canDo);
   console.log("closest garment plan", snappedPlan);
+  console.log("closest garment limits", limits);
 
   return {
     query,
@@ -234,6 +261,7 @@ export async function matchCatalogGarment(
     templateSheet: chosen.sheet,
     matches,
     plan: snappedPlan,
+    limits,
   };
 }
 
@@ -514,7 +542,7 @@ async function chooseStyleAndPlan(
   mimeType: string,
   analysis: GarmentAnalysis,
   sheets: { row: MatchRow; sheet: Buffer }[],
-): Promise<{ style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number }> {
+): Promise<{ style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number; notPossible: PrintLimit[]; canDo: string[] }> {
   const styleCodes = sheets.map((item) => item.row.style);
   const labeled = sheets.flatMap(({ row, sheet }) => {
     const logos =
@@ -570,6 +598,8 @@ async function chooseStyleAndPlan(
     unsupportedReason: "An artist needs to review this design before we can make it.",
     plan: defaultPlan,
     confidence: 0,
+    notPossible: [],
+    canDo: [],
   };
 }
 
@@ -577,7 +607,7 @@ function readJudge(
   value: unknown,
   sheets: { row: MatchRow; sheet: Buffer }[],
   defaultPlan: GarmentProjectionPlan,
-): { style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number } {
+): { style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number; notPossible: PrintLimit[]; canDo: string[] } {
   if (!value || typeof value !== "object") throw new Error("Judge response was not an object.");
   const parsed = value as Record<string, unknown>;
   const styleCodes = sheets.map((item) => item.row.style);
@@ -597,6 +627,8 @@ function readJudge(
         : "An artist needs to review this design before we can make it.",
       plan: defaultPlan,
       confidence,
+      notPossible: [],
+      canDo: [],
     };
   }
   const vp =
@@ -605,6 +637,8 @@ function readJudge(
     style: matched.row.style,
     unsupportedReason: "",
     confidence,
+    notPossible: readPrintLimits(parsed.not_possible),
+    canDo: stringArray(parsed.can_do),
     plan: {
       colorZoneMapping: stringArray(parsed.color_zone_mapping),
       logoMapping: stringArray(parsed.logo_mapping),
@@ -617,6 +651,24 @@ function readJudge(
       },
     },
   };
+}
+
+function placementCoverage(row: MatchRow, analysis: GarmentAnalysis): number {
+  const logos = row.logo_locations.filter((item) => !item.legacy).map((item) => item.name ?? "");
+  const texts = row.text_locations.filter((item) => !item.legacy).map((item) => item.name ?? "");
+  return coversPlacements(analysis.logoLocations, logos) + coversPlacements(analysis.textLocations, texts);
+}
+
+function readPrintLimits(value: unknown): PrintLimit[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const mark = typeof record.mark === "string" ? record.mark.trim() : "";
+    const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+    if (!mark || !reason) return [];
+    return [{ mark, reason }];
+  });
 }
 
 function stringArray(value: unknown): string[] {
@@ -643,6 +695,19 @@ function judgeSchema(styleCodes: string[]): JsonSchema {
       color_zone_mapping: stringList,
       logo_mapping: stringList,
       text_mapping: stringList,
+      not_possible: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            mark: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["mark", "reason"],
+        },
+      },
+      can_do: stringList,
       view_plan: {
         type: "object",
         additionalProperties: false,
@@ -663,6 +728,8 @@ function judgeSchema(styleCodes: string[]): JsonSchema {
       "color_zone_mapping",
       "logo_mapping",
       "text_mapping",
+      "not_possible",
+      "can_do",
       "view_plan",
     ],
   };

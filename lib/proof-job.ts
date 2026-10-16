@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { readGarmentFit, type GarmentFit } from "./mark-measure";
 
-const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const JOB_ID = new RegExp(`^(?:job-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z_)?${UUID}$`, "i");
 
 export type ProofCustomer = {
   category: string;
@@ -57,6 +59,11 @@ export type ProofObjectKeys = {
   status: string;
   pdf: string;
 };
+
+export function newProofJobId(now = new Date()): string {
+  const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-") + "Z";
+  return `job-${stamp}_${randomUUID()}`;
+}
 
 export function proofObjectKeys(jobId: string): ProofObjectKeys {
   if (!JOB_ID.test(jobId)) throw new Error("Bad job id.");
