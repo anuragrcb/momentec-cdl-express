@@ -1,6 +1,30 @@
+export const GARMENT_CATEGORIES = [
+  "CORPORATE APPAREL",
+  "ACCESSORIES",
+  "BASEBALL",
+  "BASKETBALL",
+  "BOTTOMS",
+  "CHEER",
+  "FLEECE",
+  "FOOTBALL",
+  "HOCKEY",
+  "LACROSSE",
+  "MULTI-SPORT",
+  "POLOS",
+  "PULLOVERS",
+  "SOCCER",
+  "SOFTBALL",
+  "TEES",
+  "TOP",
+  "TOPS",
+  "TRACK & FIELD",
+  "VOLLEYBALL",
+] as const;
+
 export const GARMENT_GENDERS = ["Men", "Women", "Youth"] as const;
 export const GARMENT_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL"] as const;
 
+export type GarmentCategory = (typeof GARMENT_CATEGORIES)[number];
 export type GarmentGender = (typeof GARMENT_GENDERS)[number];
 export type GarmentSize = (typeof GARMENT_SIZES)[number];
 export type GarmentFit = { gender: GarmentGender; size: GarmentSize };
@@ -28,6 +52,15 @@ export function fitSentence(fit: GarmentFit): string {
 
 export function garmentLabel(fit: GarmentFit): string {
   return `${fit.gender} ${fit.size}`.toUpperCase();
+}
+
+export function readGarmentSuggestion(
+  category: unknown,
+  gender: unknown,
+): { category: GarmentCategory; gender: GarmentGender } | null {
+  if (typeof category !== "string" || typeof gender !== "string") return null;
+  if (!includes(GARMENT_CATEGORIES, category) || !includes(GARMENT_GENDERS, gender)) return null;
+  return { category, gender };
 }
 
 export function readGarmentFit(gender: unknown, size: unknown): GarmentFit | null {

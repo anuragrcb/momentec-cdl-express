@@ -3,7 +3,7 @@
 import { FormEvent, MouseEvent, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { compressImageForUpload, isolateGarment, preloadBackgroundRemoval } from "@/lib/client-image";
-import { GARMENT_GENDERS, GARMENT_SIZES, readGarmentFit } from "@/lib/mark-measure";
+import { GARMENT_CATEGORIES, GARMENT_GENDERS, GARMENT_SIZES, readGarmentFit } from "@/lib/mark-measure";
 import "./upload-ai-design.css";
 
 const UploadAiModel = dynamic(() => import("./UploadAiModel").then((mod) => mod.UploadAiModel), { ssr: false });
@@ -26,29 +26,6 @@ type ViewMap = Record<ViewId, ViewFile | null>;
 type Reference = { id: string; file: File; url: string; ready: boolean; source: File };
 
 const EMPTY_VIEWS: ViewMap = { front: null, back: null, left: null, right: null };
-
-const CATEGORIES = [
-  "CORPORATE APPAREL",
-  "ACCESSORIES",
-  "BASEBALL",
-  "BASKETBALL",
-  "BOTTOMS",
-  "CHEER",
-  "FLEECE",
-  "FOOTBALL",
-  "HOCKEY",
-  "LACROSSE",
-  "MULTI-SPORT",
-  "POLOS",
-  "PULLOVERS",
-  "SOCCER",
-  "SOFTBALL",
-  "TEES",
-  "TOP",
-  "TOPS",
-  "TRACK & FIELD",
-  "VOLLEYBALL",
-];
 
 function categoryLabel(value: string) {
   return value.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
@@ -83,6 +60,8 @@ export function UploadAiDesignModal() {
   const cutoutToken = useRef<Record<string, number>>({});
   const modelToken = useRef(0);
   const modelUrlRef = useRef<string | null>(null);
+  const categoryTouched = useRef(false);
+  const genderTouched = useRef(false);
   const sheetRef = useRef<File | null>(null);
   const templateRef = useRef<File | null>(null);
   const catalogRef = useRef<unknown>(null);
@@ -122,6 +101,8 @@ export function UploadAiDesignModal() {
     }
     setReferences([]);
     setViews(EMPTY_VIEWS);
+    categoryTouched.current = false;
+    genderTouched.current = false;
     sheetRef.current = null;
     templateRef.current = null;
     catalogRef.current = null;
@@ -141,8 +122,13 @@ export function UploadAiDesignModal() {
   }
 
   function changeMatchInput(kind: "category" | "gender", value: string) {
-    if (kind === "category") setCategory(value);
-    else setGender(value);
+    if (kind === "category") {
+      categoryTouched.current = true;
+      setCategory(value);
+    } else {
+      genderTouched.current = true;
+      setGender(value);
+    }
     if (Object.values(viewsRef.current).some(Boolean)) clearGeneratedViews();
   }
 
@@ -184,12 +170,28 @@ export function UploadAiDesignModal() {
     });
   }
 
-  async function cutOut(id: string, next: File) {
+  async function suggestMatch(id: string, file: File, token: number) {
+    const body = new FormData();
+    body.append("reference", file);
+    try {
+      const response = await fetch("/api/upload-ai-design/suggest", { method: "POST", body });
+      if (cutoutToken.current[id] !== token || !response.ok) return;
+      const payload = await response.json().catch(() => null);
+      if (cutoutToken.current[id] !== token) return;
+      if (!categoryTouched.current && typeof payload?.category === "string") setCategory(payload.category);
+      if (!genderTouched.current && typeof payload?.gender === "string") setGender(payload.gender);
+    } catch {
+      // The customer can still choose category and gender by hand.
+    }
+  }
+
+  async function cutOut(id: string, next: File, suggest = false) {
     const token = (cutoutToken.current[id] ?? 0) + 1;
     cutoutToken.current[id] = token;
     placeReference(id, next, false);
     setProcessing((current) => ({ ...current, [id]: true }));
     setFileError("");
+    if (suggest) void suggestMatch(id, next, token);
 
     try {
       const isolated = await isolateGarment(next, `${id}-isolated.png`);
@@ -229,7 +231,8 @@ export function UploadAiDesignModal() {
     }
     const accepted = incoming.slice(0, room);
     if (accepted.length < incoming.length) setFileError("You can add up to 8 images.");
-    for (const file of accepted) void cutOut(crypto.randomUUID(), file);
+    const firstUpload = referencesRef.current.length === 0;
+    accepted.forEach((file, index) => void cutOut(crypto.randomUUID(), file, firstUpload && index === 0));
   }
 
   async function requestSheet(files: File[], instruction = "") {
@@ -571,7 +574,7 @@ export function UploadAiDesignModal() {
                     <option value="" disabled>
                       SELECT YOUR SPORT or CORPORATE APPAREL CATEGORY
                     </option>
-                    {CATEGORIES.map((item) => (
+                    {GARMENT_CATEGORIES.map((item) => (
                       <option key={item} value={item}>
                         {categoryLabel(item)}
                       </option>

@@ -14,8 +14,8 @@ export type VisionPart = { text: string } | { data: string; mimeType: string };
 export async function completeJson(apiKey: string, name: string, schema: JsonSchema, parts: VisionPart[]): Promise<unknown> {
   const client = new OpenAI({ apiKey });
   const completion = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4.1",
-    temperature: 0,
+    model: process.env.OPENAI_MODEL || "gpt-6-sol",
+    reasoning_effort: "none",
     response_format: {
       type: "json_schema",
       json_schema: {

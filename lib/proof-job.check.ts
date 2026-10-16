@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { filterPlanToAllowedCatalog, replaceSnappedColors, snapToBrandColorLocal } from "./colors";
+import { readGarmentSuggestion } from "./mark-measure";
 import { matchNeedsReview } from "./match-decision";
 import { parseStoredProofJob, proofObjectKeys, readProofCatalog, readProofCustomer } from "./proof-job";
 
@@ -95,5 +96,7 @@ assert.equal(matchNeedsReview("none", 0.9, ["228137"]), true);
 assert.equal(matchNeedsReview("999999", 0.95, ["228137"]), true);
 assert.equal(matchNeedsReview("228137", 0.59, ["228137"]), true);
 assert.equal(matchNeedsReview("228137", 0.6, ["228137"]), false);
+assert.deepEqual(readGarmentSuggestion("BASEBALL", "Women"), { category: "BASEBALL", gender: "Women" });
+assert.equal(readGarmentSuggestion("CRICKET", "Men"), null);
 
 console.log("proof-job check ok");

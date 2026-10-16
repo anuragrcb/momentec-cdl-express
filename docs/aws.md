@@ -42,7 +42,7 @@ Function settings that must stay:
 
 The first real run died at 3 seconds and 128 MB because those defaults were still the saved values. A later edit does not resume that job. AWS retries one request twice, then stops. A new upload creates a new job id.
 
-Environment variables on this function: `PROOF_BUCKET`, `OPENAI_API_KEY`, `MAGNIFIC_API_KEY`, and `OPENAI_MODEL` only if a model other than `gpt-4.1` is required. Do not put `MAGNIFIC_MCP_CLIENT_ID` or `MAGNIFIC_MCP_REFRESH_TOKEN` here. Those are only for the website's 3D path.
+Environment variables on this function: `PROOF_BUCKET`, `OPENAI_API_KEY`, `MAGNIFIC_API_KEY`, and `OPENAI_MODEL=gpt-6-sol`. Do not put `MAGNIFIC_MCP_CLIENT_ID` or `MAGNIFIC_MCP_REFRESH_TOKEN` here. Those are only for the website's 3D path.
 
 There is no function URL. Do not add one. The website signs the invoke with the `momentec-cdl-app` access key. A header such as `X-API-Key` is not read by this function.
 
