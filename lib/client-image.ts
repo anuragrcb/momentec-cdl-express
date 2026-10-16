@@ -74,8 +74,9 @@ async function downscaleForSegmentation(source: File | Blob, maxDim = 512): Prom
 }
 
 /**
- * Removes background surfaces (carpet, table, floor) from an uploaded garment photo
- * directly in the browser, returning a transparent PNG file.
+ * Removes background surfaces (carpet, table, floor) from an uploaded garment photo.
+ * The 512 px copy is only the mask. The cutout is applied to the original, capped at
+ * 1536 px, then flattened onto white.
  */
 export async function isolateGarment(
   file: File,
@@ -92,9 +93,69 @@ export async function isolateGarment(
     },
   };
 
-  const blob = await removeBackground(optimizedInput as ImageSource, config);
+  const mask = await removeBackground(optimizedInput as ImageSource, config);
+  const blob = await applyMaskOnWhite(file, mask, 1536);
   const baseName = fileName.replace(/\.[^/.]+$/, "");
   return new File([blob], `${baseName}.png`, { type: "image/png" });
+}
+
+async function applyMaskOnWhite(original: File, mask: Blob, maxEdge: number): Promise<Blob> {
+  const source = await loadImage(original);
+  const maskImage = await loadImage(mask);
+  let width = source.naturalWidth;
+  let height = source.naturalHeight;
+  const longEdge = Math.max(width, height);
+  if (longEdge > maxEdge) {
+    const scale = maxEdge / longEdge;
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+  }
+
+  const cutout = document.createElement("canvas");
+  cutout.width = width;
+  cutout.height = height;
+  const cutoutContext = cutout.getContext("2d");
+  const flat = document.createElement("canvas");
+  flat.width = width;
+  flat.height = height;
+  const flatContext = flat.getContext("2d");
+  if (!cutoutContext || !flatContext) return original;
+
+  cutoutContext.imageSmoothingEnabled = true;
+  cutoutContext.imageSmoothingQuality = "high";
+  cutoutContext.drawImage(source, 0, 0, width, height);
+  cutoutContext.globalCompositeOperation = "destination-in";
+  cutoutContext.drawImage(maskImage, 0, 0, width, height);
+
+  flatContext.fillStyle = "#ffffff";
+  flatContext.fillRect(0, 0, width, height);
+  flatContext.drawImage(cutout, 0, 0);
+  return canvasToPng(flat);
+}
+
+function loadImage(source: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(source);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read the uploaded image."));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not flatten the garment image."));
+    }, "image/png");
+  });
 }
 
 /**

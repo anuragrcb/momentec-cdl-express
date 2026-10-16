@@ -1,5 +1,12 @@
 import sharp from "sharp";
-import { matchCatalogGarment, type CatalogMatchResult } from "./catalog-match";
+import {
+  matchCatalogGarment,
+  type CatalogMatchResult,
+  type GarmentProjectionPlan,
+  type LocationItem,
+  type MatchRow,
+  type ZoneItem,
+} from "./catalog-match";
 import { generateGptImageSheet } from "./magnific";
 
 export type ArtworkView = "front" | "back" | "left" | "right";
@@ -18,7 +25,7 @@ export interface DesignReference {
   mimeType: string;
 }
 
-export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenceCount: number): string {
+export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenceCount: number, editNote = ""): string {
   const designImages =
     referenceCount === 1
       ? "Image 2 is the customer's uploaded custom design reference."
@@ -94,48 +101,14 @@ Hard layout rules:
 - Draw each garment at full length from top edge to bottom edge inside its cell, matching Image 1's scale and placement.
 - Do not draw any captions, labels, or view names. Only marks that belong on the garment fabric itself may appear.
 - The garment is empty: no person, mannequin, hanger, neck, skin, or arms.
-
+${editLine(editNote)}
 Output only the completed 2x2 image.`;
 }
 
-export function buildSheetPrompt(referenceCount: number, instruction = ""): string {
-  const note = instruction.replace(/\s+/g, " ").trim().slice(0, 400);
-  const labeled = note.length > 0 && referenceCount === 4;
-  const names = Array.from({ length: referenceCount }, (_, index) => `Image ${index + 1}`).join(", ");
-  const attached = labeled
-    ? "Image 1 is the current front, Image 2 is the current back, Image 3 is the current left, and Image 4 is the current right."
-    : referenceCount === 1
-      ? `${names} is an unordered reference of one garment.`
-      : `${names} are unordered references of one garment. They are not in any particular order.`;
-  const edit = note
-    ? `\nLook-and-feel edit, apply it in every cell: ${note}\nKeep the same garment and the same angles. Change only what was asked.\n`
-    : "";
-  const sameness = note
-    ? "- Keep the garment's construction and full length. Change the look only where the edit asks for a change."
-    : "- Same colors, materials, pattern, and scale in every cell. If a pattern wraps the garment, continue it around the form. A mark that appears on only one face stays on that face. Do not invent new marks.";
-
-  return `Redraw ONE garment as a clean 2x2 product sheet of a single 3D model. ${attached} Look at each photo and decide what it shows. A photo may be the front, the back, a side, or another photo of an angle you already have. Copy the garment type from those photos. It may be any apparel: a top, a bottom, a dress, outerwear, or anything else shown. Then render all four views of that same solid 3D garment.
-
-The four cells are four views of one 3D object, turned in 90 degree steps. Same scale, same camera distance, same vertical placement. The camera is orthographic, with no wide-angle lens and no dramatic perspective. The garment itself is not flat: it has volume, sleeve depth, a side wall, and an open collar or waist. Soft studio light shows that form. Do not draw a flat vector, a paper cutout, or a print sitting on a silhouette. A side view is that same model rotated, so you see its thickness.
-
-Sheet layout, exactly one garment in each cell:
-- Top-left cell: ${ANGLE.front}. One garment.
-- Top-right cell: ${ANGLE.back}. One garment.
-- Bottom-left cell: ${ANGLE.left}. One garment.
-- Bottom-right cell: ${ANGLE.right}. One garment.
-
-The references are evidence, not cell assignments. Do not paste a photo into a cell with a caption. Redraw every cell, including an angle that a reference already shows, so all four match.
-${edit}
-Hard rules:
-- Each cell contains exactly one garment. Never draw two garments, a pair of profiles, or two angles together in one cell.
-- Keep the construction that is visible in the references: silhouette, openings, closures, length, and every part that is actually there. Do not add parts that are not there, and do not remove parts that are.
-- Plain white background in every cell. Draw a wide plain white cross through the exact center, horizontal and vertical, about one tenth of the sheet wide. No garment may touch or cross that white cross. No black background, no colored backdrop, and no shadow.
-- Draw each garment at full length, the same length as the reference, from its top edge to its bottom edge. The front and the back must include the bottom edge. Do not crop them, zoom in, or end them early. Leave a clear band of white under that bottom edge, before the white cross, and between the garment and the outer edge of its cell.
-- Do not draw any text, captions, parentheses, or view names. Marks that are already printed on the garment stay on the fabric.
-${sameness}
-- The garment is empty. No person, mannequin, hanger, or body. Do not draw skin, a face, neck, chin, arms, or hands above, inside, or beside the garment.
-
-Output only the image.`;
+function editLine(note: string): string {
+  const text = note.replace(/\s+/g, " ").trim().slice(0, 400);
+  if (!text) return "";
+  return `\nRequested change: ${text}\nApply that change on every view. Do not change the garment cut away from Image 1.\n`;
 }
 
 function isGarmentPixel(red: number, green: number, blue: number): boolean {
@@ -214,24 +187,66 @@ export async function splitSheet(buffer: Buffer): Promise<Record<ArtworkView, Bu
 export async function generateMissingSheet(
   references: DesignReference[],
   instruction = "",
-  options?: { gender?: string; category?: string },
+  options?: { gender?: string; category?: string; edit?: CatalogMatchResult },
 ): Promise<{ sheet: Buffer; views: Record<ArtworkView, Buffer>; match?: CatalogMatchResult }> {
   if (references.length === 0) throw new Error("At least one uploaded image is required.");
 
   const trimmedInstruction = instruction.trim();
-  if (!trimmedInstruction) {
-    const match = await matchCatalogGarment(references[0].buffer, references[0].mimeType, options);
-    const prompt = buildCatalogProjectionPrompt(match, references.length);
-    const sheet = await generateGptImageSheet(prompt, [
-      { buffer: match.templateSheet, mimeType: "image/png" },
-      ...references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
-    ]);
-    return { sheet, views: await splitSheet(sheet), match };
-  }
+  const match = trimmedInstruction
+    ? options?.edit
+    : await matchCatalogGarment(references[0].buffer, references[0].mimeType, options);
+  if (!match) throw new Error("Make the four views before applying an edit.");
+  const prompt = buildCatalogProjectionPrompt(match, references.length, trimmedInstruction);
+  const sheet = await generateGptImageSheet(prompt, [
+    { buffer: match.templateSheet, mimeType: "image/png" },
+    ...references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
+  ]);
+  return { sheet, views: await splitSheet(sheet), match };
+}
 
-  const sheet = await generateGptImageSheet(
-    buildSheetPrompt(references.length, trimmedInstruction),
-    references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
-  );
-  return { sheet, views: await splitSheet(sheet) };
+export function readEditMatch(raw: string, template: Buffer): CatalogMatchResult | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const style = typeof record.style === "string" ? record.style.trim() : "";
+  if (!style || !record.plan || typeof record.plan !== "object") return null;
+  const plan = record.plan as Record<string, unknown>;
+  const view = plan.viewPlan && typeof plan.viewPlan === "object" ? (plan.viewPlan as Record<string, unknown>) : {};
+  const projection: GarmentProjectionPlan = {
+    colorZoneMapping: textList(plan.colorZoneMapping),
+    logoMapping: textList(plan.logoMapping),
+    textMapping: textList(plan.textMapping),
+    viewPlan: {
+      front: typeof view.front === "string" ? view.front : "",
+      back: typeof view.back === "string" ? view.back : "",
+      left: typeof view.left === "string" ? view.left : "",
+      right: typeof view.right === "string" ? view.right : "",
+    },
+  };
+  const winner: MatchRow = {
+    style,
+    name: typeof record.name === "string" ? record.name : "",
+    brand: typeof record.brand === "string" ? record.brand : "",
+    sport: typeof record.sport === "string" ? record.sport : "",
+    segment: typeof record.segment === "string" ? record.segment : "",
+    score: typeof record.score === "number" ? record.score : null,
+    logo_locations: itemList<LocationItem>(record.logo_locations),
+    text_locations: itemList<LocationItem>(record.text_locations),
+    color_zones: itemList<ZoneItem>(record.color_zones),
+  };
+  return { query: "", style, winner, templateSheet: template, matches: [winner], plan: projection };
+}
+
+function textList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+}
+
+function itemList<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
 }

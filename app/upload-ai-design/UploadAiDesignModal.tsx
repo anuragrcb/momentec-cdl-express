@@ -84,6 +84,7 @@ export function UploadAiDesignModal() {
   const modelToken = useRef(0);
   const modelUrlRef = useRef<string | null>(null);
   const sheetRef = useRef<File | null>(null);
+  const templateRef = useRef<File | null>(null);
   const catalogRef = useRef<unknown>(null);
   referencesRef.current = references;
   viewsRef.current = views;
@@ -122,8 +123,27 @@ export function UploadAiDesignModal() {
     setReferences([]);
     setViews(EMPTY_VIEWS);
     sheetRef.current = null;
+    templateRef.current = null;
     catalogRef.current = null;
     clearModel();
+  }
+
+  function clearGeneratedViews() {
+    for (const view of Object.values(viewsRef.current)) {
+      if (view) URL.revokeObjectURL(view.url);
+    }
+    setViews(EMPTY_VIEWS);
+    sheetRef.current = null;
+    templateRef.current = null;
+    catalogRef.current = null;
+    setEditNote("");
+    clearModel();
+  }
+
+  function changeMatchInput(kind: "category" | "gender", value: string) {
+    if (kind === "category") setCategory(value);
+    else setGender(value);
+    if (Object.values(viewsRef.current).some(Boolean)) clearGeneratedViews();
   }
 
   function clearModel() {
@@ -217,7 +237,15 @@ export function UploadAiDesignModal() {
 
     const body = new FormData();
     for (const file of files) body.append("reference", file);
-    if (instruction) body.append("instruction", instruction);
+    if (instruction) {
+      if (!templateRef.current || !catalogRef.current) {
+        setFileError("Make the four views before applying an edit.");
+        return;
+      }
+      body.append("instruction", instruction);
+      body.append("template", templateRef.current);
+      body.append("catalog", JSON.stringify(catalogRef.current));
+    }
     if (gender) body.append("gender", gender);
     if (category) body.append("category", category);
     clearModel();
@@ -247,6 +275,7 @@ export function UploadAiDesignModal() {
       if (payload?.catalog && typeof payload.catalog === "object") {
         catalogRef.current = payload.catalog;
       }
+      if (typeof payload?.template === "string") templateRef.current = pngFile("template", payload.template);
       const images = payload?.images ?? {};
       if (typeof payload?.sheet === "string") sheetRef.current = pngFile("sheet", payload.sheet);
       const created = VIEWS.flatMap((view) => {
@@ -270,6 +299,10 @@ export function UploadAiDesignModal() {
   }
 
   function generateRest() {
+    if (!gender || !category) {
+      setFileError("Choose a category and a gender before making the four views.");
+      return;
+    }
     const ready = references.filter((item) => item.ready).map((item) => item.file);
     void requestSheet(ready);
   }
@@ -304,6 +337,7 @@ export function UploadAiDesignModal() {
     }
     setViews(EMPTY_VIEWS);
     sheetRef.current = null;
+    templateRef.current = null;
     catalogRef.current = null;
     setEditNote("");
     clearModel();
@@ -390,6 +424,7 @@ export function UploadAiDesignModal() {
   }
 
   const viewCount = VIEWS.filter((view) => views[view.id]).length;
+  const matchInputsLocked = isRemovingBackground || generating || preparing || uploaded;
   const fieldsLocked = viewCount < 4 || isRemovingBackground || generating || preparing || uploaded;
   const referenceLabel = references.length === 1 ? "1 image" : `${references.length} images`;
 
@@ -523,35 +558,26 @@ export function UploadAiDesignModal() {
                   </button>
                 </div>
               ) : null}
-              {viewCount < 4 && (generating || (hasReadyReference && !isRemovingBackground)) ? (
-                <button type="button" className="upload-ai-generate" onClick={generateRest} disabled={generating || preparing || isRemovingBackground}>
-                  {generating ? "Making the views" : "Make the four views"}
-                </button>
-              ) : null}
-              {fileError ? <p className="upload-ai-file-error">{fileError}</p> : null}
-
-              <fieldset className="upload-ai-fields" disabled={fieldsLocked}>
-              <label className="upload-ai-field">
-                <span><i>*</i>Category:</span>
-                <select
-                  name="category"
-                  required
-                  value={category}
-                  className={category ? undefined : "is-placeholder"}
-                  onChange={(event) => setCategory(event.target.value)}
-                >
-                  <option value="" disabled>
-                    SELECT YOUR SPORT or CORPORATE APPAREL CATEGORY
-                  </option>
-                  {CATEGORIES.map((item) => (
-                    <option key={item} value={item}>
-                      {categoryLabel(item)}
+              <fieldset className="upload-ai-fields" disabled={matchInputsLocked}>
+                <label className="upload-ai-field">
+                  <span><i>*</i>Category:</span>
+                  <select
+                    name="category"
+                    required
+                    value={category}
+                    className={category ? undefined : "is-placeholder"}
+                    onChange={(event) => changeMatchInput("category", event.target.value)}
+                  >
+                    <option value="" disabled>
+                      SELECT YOUR SPORT or CORPORATE APPAREL CATEGORY
                     </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="upload-ai-fit">
+                    {CATEGORIES.map((item) => (
+                      <option key={item} value={item}>
+                        {categoryLabel(item)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="upload-ai-field">
                   <span><i>*</i>Gender:</span>
                   <select
@@ -559,7 +585,7 @@ export function UploadAiDesignModal() {
                     required
                     value={gender}
                     className={gender ? undefined : "is-placeholder"}
-                    onChange={(event) => setGender(event.target.value)}
+                    onChange={(event) => changeMatchInput("gender", event.target.value)}
                   >
                     <option value="" disabled>
                       Select
@@ -571,6 +597,16 @@ export function UploadAiDesignModal() {
                     ))}
                   </select>
                 </label>
+              </fieldset>
+              {viewCount < 4 && (generating || (hasReadyReference && !isRemovingBackground)) ? (
+                <button type="button" className="upload-ai-generate" onClick={generateRest} disabled={generating || preparing || isRemovingBackground || !gender || !category}>
+                  {generating ? "Making the views" : "Make the four views"}
+                </button>
+              ) : null}
+              {fileError ? <p className="upload-ai-file-error">{fileError}</p> : null}
+
+              <fieldset className="upload-ai-fields" disabled={fieldsLocked}>
+              <div className="upload-ai-fit">
                 <label className="upload-ai-field">
                   <span><i>*</i>Size:</span>
                   <select

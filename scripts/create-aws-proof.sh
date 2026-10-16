@@ -167,13 +167,13 @@ try {
     env[match[1]] = value;
   }
 } catch {}
-if (!env.GEMINI_API_KEY || !env.MAGNIFIC_API_KEY) process.exit(2);
+if (!env.OPENAI_API_KEY || !env.MAGNIFIC_API_KEY) process.exit(2);
 const variables = {
   PROOF_BUCKET: bucket,
-  GEMINI_API_KEY: env.GEMINI_API_KEY,
+  OPENAI_API_KEY: env.OPENAI_API_KEY,
   MAGNIFIC_API_KEY: env.MAGNIFIC_API_KEY,
 };
-if (env.GEMINI_MODEL) variables.GEMINI_MODEL = env.GEMINI_MODEL;
+if (env.OPENAI_MODEL) variables.OPENAI_MODEL = env.OPENAI_MODEL;
 writeFileSync(destination, JSON.stringify({ Variables: variables }));
 ' "$BUCKET" "$ENV_FILE"; then
   aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --environment "file://${ENV_FILE}" >/dev/null
@@ -181,7 +181,7 @@ writeFileSync(destination, JSON.stringify({ Variables: variables }));
   echo "Lambda environment set from .env (values not printed)."
 else
   rm -f "$ENV_FILE"
-  echo "Set GEMINI_API_KEY, MAGNIFIC_API_KEY, and PROOF_BUCKET=${BUCKET} on the function in the Lambda console."
+  echo "Set OPENAI_API_KEY, MAGNIFIC_API_KEY, and PROOF_BUCKET=${BUCKET} on the function in the Lambda console."
 fi
 
 cat <<EOF

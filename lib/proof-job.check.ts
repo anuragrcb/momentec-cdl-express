@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { filterPlanToAllowedCatalog, replaceSnappedColors, snapToBrandColorLocal } from "./colors";
+import { matchNeedsReview } from "./match-decision";
 import { parseStoredProofJob, proofObjectKeys, readProofCatalog, readProofCustomer } from "./proof-job";
 
 const jobId = "11111111-1111-4111-8111-111111111111";
@@ -89,5 +90,10 @@ const filteredPlan = filterPlanToAllowedCatalog(
 assert.deepEqual(filteredPlan.colorZoneMapping, ["Body Color (SUB_FIRST_BODY_COLOR): WHITE (#FFFFFF)"]);
 assert.deepEqual(filteredPlan.logoMapping, ["Front Center Full (m2): Tiger crest on front"]);
 assert.deepEqual(filteredPlan.textMapping, ["Back Center (t7): 24 in SCARLET (#A31F2D)"]);
+
+assert.equal(matchNeedsReview("none", 0.9, ["228137"]), true);
+assert.equal(matchNeedsReview("999999", 0.95, ["228137"]), true);
+assert.equal(matchNeedsReview("228137", 0.59, ["228137"]), true);
+assert.equal(matchNeedsReview("228137", 0.6, ["228137"]), false);
 
 console.log("proof-job check ok");

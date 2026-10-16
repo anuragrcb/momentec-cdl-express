@@ -82,11 +82,11 @@
         <h2><span>1</span>Website</h2>
         <dl>
           <dt>In</dt>
-          <dd>One design photo (jpg, png, or webp). Sport, gender, and size if the form already has them.</dd>
+          <dd>One design photo (jpg, png, or webp), plus category and gender. Size, name, and email stay locked until the four views exist. The photo is masked at 512 px, then that mask is applied to the original and flattened on white at up to 1536 px.</dd>
           <dt>Prompt or call</dt>
-          <dd>None. The page sends the photo to the next step when the customer clicks Make the four views.</dd>
+          <dd>None. Make the four views stays disabled until category and gender are set. Changing either after the views exist clears those views.</dd>
           <dt>Out</dt>
-          <dd>The same photo, forwarded.</dd>
+          <dd>The flattened photo, category, and gender, forwarded.</dd>
           <dt>Example</dt>
           <dd>A short-sleeve crew jersey photo with a chest wordmark and a number.</dd>
         </dl>
@@ -95,7 +95,7 @@
 
     <section class="step">
       <article class="box">
-        <h2><span>2</span>Gemini, first call</h2>
+        <h2><span>2</span>OpenAI, first call</h2>
         <dl>
           <dt>In</dt>
           <dd>The uploaded photo.</dd>
@@ -186,7 +186,7 @@ preview-228137_right</pre></dd>
 
     <section class="step">
       <article class="box">
-        <h2><span>5</span>Gemini, second call + catalog placement filter &amp; color snap</h2>
+        <h2><span>5</span>OpenAI, second call + catalog placement filter &amp; color snap</h2>
         <dl>
           <dt>In</dt>
           <dd>Image 1 is the customer photo. Then up to three 2x2 candidate sheets, each labeled with that style’s name, brand, allowed <code>logo_locations</code>, allowed <code>text_locations</code>, and <code>color_zones</code>.</dd>
@@ -229,9 +229,9 @@ preview-228137_right</pre></dd>
         <h2><span>6</span>Magnific</h2>
         <dl>
           <dt>In</dt>
-          <dd>Image 1: the winning style’s 2x2 template. Image 2: the customer photo. The prompt includes the filtered placements and snapped Momentec color mappings from step 5.</dd>
+          <dd>Image 1: the winning style’s 2x2 template. Image 2: the customer photo. The prompt includes the filtered placements and snapped Momentec color mappings from step 5. A later “Apply this edit” sends the same template again as Image 1, with the edit note added as one line. It does not redraw a new garment.</dd>
           <dt>Prompt or call</dt>
-          <dd><code>buildCatalogProjectionPrompt</code> → Magnific <code>gpt-image-2-edit</code>. Keep Image 1’s exact 3D silhouette, collar, sleeves, buttons, hem, and 2x2 layout. Paint every fabric zone, trim, logo, and text using the snapped Momentec <code>#RRGGBB</code> hex codes instead of copying raw shades from Image 2. Render <strong>only</strong> the logos and text/numbers listed in the allowed catalog placements; any mark on Image 2 at an unsupported placement is left blank.</dd>
+          <dd><code>buildCatalogProjectionPrompt</code> → Magnific <code>gpt-image-2-edit</code>. Keep Image 1’s exact 3D silhouette, collar, sleeves, buttons, hem, and 2x2 layout. Paint every fabric zone, trim, logo, and text using the snapped Momentec <code>#RRGGBB</code> hex codes instead of copying raw shades from Image 2. Render <strong>only</strong> the logos and text/numbers listed in the allowed catalog placements; any mark on Image 2 at an unsupported placement is left blank. If the judge’s confidence is below 0.6, or the winner is not one of the candidate styles, the page stops and asks for an artist review. Magnific is not called.</dd>
           <dt>Out</dt>
           <dd>One 2x2 PNG rendered in the closest manufacturable Momentec colors and allowed placements. The site splits it on the white cross into front, back, left, and right, and shows those four views to the customer.</dd>
           <dt>Example</dt>
@@ -263,9 +263,9 @@ preview-228137_right</pre></dd>
           <dt>In</dt>
           <dd><code>&lt;jobId&gt;/sheet.png</code> and <code>&lt;jobId&gt;/job.json</code> (gender, size, and the matched style’s brand, <code>logo_locations</code>, <code>text_locations</code>, <code>color_zones</code>, and snapped <code>plan</code>).</dd>
           <dt>Prompt or call</dt>
-          <dd>Gemini (<code>DECORATION_LIST_PROMPT</code>) reads the sheet against the style’s official catalog zones and locations. Code drops any fill zone or decoration mark that is not in the style’s allowed <code>color_zones</code>, <code>logo_locations</code>, or <code>text_locations</code>, snaps mark heights to the location’s allowed inch <code>params</code>, and snaps every fill and ink hex to the official Momentec brand color (<code>POST /colors/nearest</code> with local CIE Lab ΔE fallback). Magnific then isolates the front view, back view, and each allowed mark on white.</dd>
+          <dd>OpenAI (<code>DECORATION_LIST_PROMPT</code>, JSON schema, temperature 0, one retry) reads the sheet against the style’s official catalog zones and locations. Code drops any fill zone or decoration mark that is not in the style’s allowed <code>color_zones</code>, <code>logo_locations</code>, or <code>text_locations</code>, snaps mark heights to the location’s allowed inch <code>params</code>, and snaps every fill and ink hex to the official Momentec brand color (<code>POST /colors/nearest</code> with local CIE Lab ΔE fallback). The front and back pictures are cropped from the approved sheet. Magnific isolates each allowed mark on white.</dd>
           <dt>Out</dt>
-          <dd>A private PDF at <code>&lt;jobId&gt;/proof.pdf</code> in S3. Page 1: order summary, front and back views, garment info, and snapped fill colors per catalog zone. Next: team/company decoration and roster decoration (official location name + code, isolated mark, snapped Momentec ink swatches, and snapped inch dimensions). Last: roster line and customer comments.</dd>
+          <dd>A private PDF at <code>&lt;jobId&gt;/proof.pdf</code> in S3. Page 1: order summary, cropped front and back, the matched style number, garment name, and real size, plus snapped fill colors. Next: team/company decoration and roster decoration. Last: the customer’s name and message. REF#, ecom order number, and artist stay highlighted because they still have no source.</dd>
           <dt>Example</dt>
           <dd><pre>FILL COLORS
 BODY COLOR: SCARLET
@@ -280,7 +280,7 @@ ROSTER DECORATION
 BACK CENTER SUBLIMATION NUMBER
 LOC: T7
 SENTINEL: 8 INCH</pre>
-          <p>The style number printed on the PDF is still the sample 228435. The matched style is used for places and colors. Wiring that number onto the PDF is not done yet. Order number, artist, and the long sample comment are also still placeholders.</p></dd>
+          <p>REF#, the ecom order number, and the artist stay the sample values. The style number, garment name, size, and customer comment come from the job.</p></dd>
         </dl>
       </article>
     </section>

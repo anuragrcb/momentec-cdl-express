@@ -1,7 +1,8 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import sharp from "sharp";
 import { filterPlanToAllowedCatalog, snapPlanColors } from "./colors";
+import { matchNeedsReview } from "./match-decision";
+import { completeJson, type JsonSchema } from "./openai-json";
 
 // WSL drops the catalog connection when Node's address attempt is only 250ms.
 setDefaultAutoSelectFamilyAttemptTimeout(10_000);
@@ -38,15 +39,16 @@ Reply with ONLY valid JSON in this exact shape:
   "supported": true,
   "unsupported_reason": "",
   "queries": ["<best catalog product name>", "<second closest catalog product name>", "<third closest catalog product name>"],
-  "garment_piece": "top" | "bottom" | "one-piece" | "other",
-  "sleeves": "sleeveless" | "short" | "3/4" | "long" | "none",
-  "segment": "adult" | "ladies" | "youth",
-  "logo_locations": ["Front Center Full", "Upper Left Chest", "Upper Right Chest", "Left Short Sleeve", "Right Short Sleeve", "Back Center", "Small Back Upper Center", "Front Lower Right Leg", "Front Lower Left Leg"],
-  "text_locations": ["Front Center", "Back Center", "Back Upper Center", "Upper Left Chest", "Upper Right Chest", "Lower Left Chest", "Lower Right Chest"],
+  "garment_piece": "top",
+  "sleeves": "short",
+  "segment": "adult",
+  "logo_locations": [],
+  "text_locations": [],
   "has_buttons": false,
-  "color_panels": 2
+  "color_panels": 2,
+  "confidence": 0.0
 }
-Only include logo_locations and text_locations that are actually visible on the garment.`;
+logo_locations and text_locations must list only placements that are actually visible. Use an empty array when none are visible. confidence is 0 to 1.`;
 
 const JUDGE_AND_PLAN_PROMPT = `Image 1 is the customer's uploaded garment design.
 Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Bottom-Left: Left side, Bottom-Right: Right side) of one candidate Momentec catalog style, accompanied by its catalog name, allowed logo placements, allowed text placements, and color zones.
@@ -65,23 +67,19 @@ Reply with ONLY valid JSON in this exact shape:
 {
   "supported": true,
   "unsupported_reason": "",
-  "style": "<winning style code, e.g. 228137>",
-  "color_zone_mapping": [
-    "Body Color (SUB_FIRST_BODY_COLOR): ..."
-  ],
-  "logo_mapping": [
-    "Upper Left Chest (m6): ..."
-  ],
-  "text_mapping": [
-    "Front Center (t2): ..."
-  ],
+  "winner_style": "<one of the candidate style codes, or none>",
+  "confidence": 0.0,
+  "color_zone_mapping": [],
+  "logo_mapping": [],
+  "text_mapping": [],
   "view_plan": {
     "front": "...",
     "back": "...",
     "left": "...",
     "right": "..."
   }
-}`;
+}
+winner_style must be one of the candidate style codes, or "none" when no candidate matches. confidence is 0 to 1. Use 0 when you are not sure.`;
 
 export type GarmentAnalysis = {
   supported: boolean;
@@ -152,14 +150,14 @@ export async function matchCatalogGarment(
 ): Promise<CatalogMatchResult> {
   const searchUrl = process.env.MOMENTEC_CATALOG_SEARCH_URL || process.env["momentec-catalog-search-url"];
   const searchKey = process.env.CATALOG_API_KEY || process.env["X-API-Key"];
-  const geminiKey = process.env.GEMINI_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
   const garmentUrl = process.env.GARMENT_IMAGE_URL || process.env["garment-image-url"];
-  if (!searchUrl || !searchKey || !geminiKey || !garmentUrl) {
-    console.error("Catalog search URL, X-API-Key, garment image URL, or GEMINI_API_KEY is not set.");
+  if (!searchUrl || !searchKey || !openaiKey || !garmentUrl) {
+    console.error("Catalog search URL, X-API-Key, garment image URL, or OPENAI_API_KEY is not set.");
     throw new CatalogMatchError("Could not search the catalog.", 503);
   }
 
-  const analysis = await describeGarment(geminiKey, photoBytes, mimeType);
+  const analysis = await describeGarment(openaiKey, photoBytes, mimeType);
   const query = analysis.queries.join(" | ");
   if (!analysis.supported) {
     const reason =
@@ -192,7 +190,7 @@ export async function matchCatalogGarment(
     throw new CatalogMatchError(reason, 422, query, matches);
   }
 
-  const judged = await chooseStyleAndPlan(geminiKey, photoBytes, mimeType, analysis, comparable);
+  const judged = await chooseStyleAndPlan(openaiKey, photoBytes, mimeType, analysis, comparable);
   console.log(
     "closest garment sheets",
     comparable.map((item) => item.row.style),
@@ -202,12 +200,17 @@ export async function matchCatalogGarment(
   if (!judged.style) {
     const reason =
       judged.unsupportedReason ||
-      "We cannot manufacture this garment because it does not match any style in our catalog.";
+      "An artist needs to review this design before we can make it.";
     console.log("closest garment", "none (unsupported)", reason);
     throw new CatalogMatchError(reason, 422, query, matches);
   }
 
-  const chosen = comparable.find((item) => item.row.style === judged.style) ?? comparable[0];
+  const chosen = comparable.find((item) => item.row.style === judged.style);
+  if (!chosen) {
+    const reason = "An artist needs to review this design before we can make it.";
+    console.log("closest garment", "none (unmatched)", reason);
+    throw new CatalogMatchError(reason, 422, query, matches);
+  }
   const filteredPlan = filterPlanToAllowedCatalog(judged.plan, chosen.row);
   const snappedPlan = await snapPlanColors(filteredPlan, chosen.row.brand);
   console.log(
@@ -234,80 +237,54 @@ export async function matchCatalogGarment(
   };
 }
 
+const stringList: JsonSchema = { type: "array", items: { type: "string" } };
+
+const DESCRIBE_SCHEMA: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    supported: { type: "boolean" },
+    unsupported_reason: { type: "string" },
+    queries: stringList,
+    garment_piece: { type: "string", enum: ["top", "bottom", "one-piece", "other"] },
+    sleeves: { type: "string", enum: ["sleeveless", "short", "3/4", "long", "none"] },
+    segment: { type: "string", enum: ["adult", "ladies", "youth"] },
+    logo_locations: stringList,
+    text_locations: stringList,
+    has_buttons: { type: "boolean" },
+    color_panels: { type: "number" },
+    confidence: { type: "number" },
+  },
+  required: [
+    "supported",
+    "unsupported_reason",
+    "queries",
+    "garment_piece",
+    "sleeves",
+    "segment",
+    "logo_locations",
+    "text_locations",
+    "has_buttons",
+    "color_panels",
+    "confidence",
+  ],
+};
+
 async function describeGarment(apiKey: string, photo: Buffer, mimeType: string): Promise<GarmentAnalysis> {
-  const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-  });
-  const result = await model.generateContent([
+  const parts = [
     { text: DESCRIBE_PROMPT },
-    { inlineData: { data: photo.toString("base64"), mimeType } },
-  ]);
-  const raw = result.response.text().trim();
-  const cleaned = raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  try {
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    const supported =
-      parsed.supported !== false && parsed.garment_piece !== "one-piece" && parsed.garment_piece !== "other";
-    const unsupportedReason = typeof parsed.unsupported_reason === "string" ? parsed.unsupported_reason.trim() : "";
-    const queries = Array.isArray(parsed.queries)
-      ? parsed.queries
-          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-          .map((q) => q.trim())
-          .slice(0, 3)
-      : [];
-    if (!supported || queries.length > 0) {
-      const seg = parsed.segment === "ladies" || parsed.segment === "youth" ? parsed.segment : "adult";
-      const piece =
-        parsed.garment_piece === "bottom" ||
-        parsed.garment_piece === "one-piece" ||
-        parsed.garment_piece === "other"
-          ? parsed.garment_piece
-          : "top";
-      const sleeves =
-        parsed.sleeves === "sleeveless" ||
-        parsed.sleeves === "short" ||
-        parsed.sleeves === "3/4" ||
-        parsed.sleeves === "long" ||
-        parsed.sleeves === "none"
-          ? parsed.sleeves
-          : "short";
-      return {
-        supported,
-        unsupportedReason,
-        queries,
-        garmentPiece: piece,
-        sleeves,
-        segment: seg,
-        logoLocations: stringArray(parsed.logo_locations),
-        textLocations: stringArray(parsed.text_locations),
-        hasButtons: Boolean(parsed.has_buttons),
-        colorPanels: typeof parsed.color_panels === "number" ? parsed.color_panels : 2,
-      };
+    { data: photo.toString("base64"), mimeType },
+  ];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const parsed = await completeJson(apiKey, "describe_garment", DESCRIBE_SCHEMA, parts);
+      const analysis = readDescribe(parsed);
+      if (analysis && (!analysis.supported || analysis.queries.length > 0)) return analysis;
+    } catch (error) {
+      console.error("describe garment attempt failed:", error instanceof Error ? error.message : error);
     }
-  } catch {
-    // Fall back if Gemini did not return JSON.
   }
-  const fallback = cleaned
-    .replace(/[*_#]/g, " ")
-    .split(/[.\n]/)[0]
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .slice(0, 6)
-    .join(" ");
-  if (!fallback) throw new Error("Gemini returned an empty description.");
-  return {
-    supported: true,
-    unsupportedReason: "",
-    queries: [fallback],
-    garmentPiece: "top",
-    sleeves: "short",
-    segment: "adult",
-    logoLocations: [],
-    textLocations: [],
-    hasButtons: false,
-    colorPanels: 2,
-  };
+  throw new CatalogMatchError("We could not read this design. An artist needs to review it.", 422);
 }
 
 async function searchCatalog(
@@ -537,10 +514,8 @@ async function chooseStyleAndPlan(
   mimeType: string,
   analysis: GarmentAnalysis,
   sheets: { row: MatchRow; sheet: Buffer }[],
-): Promise<{ style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan }> {
-  const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-  });
+): Promise<{ style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number }> {
+  const styleCodes = sheets.map((item) => item.row.style);
   const labeled = sheets.flatMap(({ row, sheet }) => {
     const logos =
       row.logo_locations
@@ -561,18 +536,15 @@ async function chooseStyleAndPlan(
       {
         text: `Candidate style ${row.style}: "${row.name}" (Brand: ${row.brand}, Sport: ${row.sport}, Segment: ${row.segment}). Allowed logo locations: ${logos}. Allowed text locations: ${texts}. Color zones: ${zones}. 2x2 views (front, back, left, right):`,
       },
-      { inlineData: { data: sheet.toString("base64"), mimeType: "image/png" } },
+      { data: sheet.toString("base64"), mimeType: "image/png" },
     ];
   });
   const detectedSummary = `Uploaded garment detected placements — Logos: ${analysis.logoLocations.join(", ") || "none"}; Text/Numbers: ${analysis.textLocations.join(", ") || "none"}; Buttons: ${analysis.hasButtons ? "yes" : "no"}; Approx color panels: ${analysis.colorPanels}.`;
-  const result = await model.generateContent([
-    { text: `${JUDGE_AND_PLAN_PROMPT}\n\n${detectedSummary}` },
-    { inlineData: { data: photo.toString("base64"), mimeType } },
+  const parts = [
+    { text: `${JUDGE_AND_PLAN_PROMPT}\n\nCandidate style codes: ${styleCodes.join(", ")}\n\n${detectedSummary}` },
+    { data: photo.toString("base64"), mimeType },
     ...labeled,
-  ]);
-  const raw = result.response.text().trim();
-  const cleaned = raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-
+  ];
   const defaultPlan: GarmentProjectionPlan = {
     colorZoneMapping: [],
     logoMapping: [],
@@ -585,52 +557,66 @@ async function chooseStyleAndPlan(
     },
   };
 
-  try {
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    if (parsed.supported === false) {
-      const reason =
-        typeof parsed.unsupported_reason === "string" && parsed.unsupported_reason.trim()
-          ? parsed.unsupported_reason.trim()
-          : "We cannot manufacture this garment because it does not match any style in our catalog.";
-      return { style: null, unsupportedReason: reason, plan: defaultPlan };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const parsed = await completeJson(apiKey, "judge_garment", judgeSchema(styleCodes), parts);
+      return readJudge(parsed, sheets, defaultPlan);
+    } catch (error) {
+      console.error("judge garment attempt failed:", error instanceof Error ? error.message : error);
     }
-    const rawStyle = typeof parsed.style === "string" ? parsed.style.trim() : "";
-    const matched = sheets.find((item) => new RegExp(`\\b${item.row.style}\\b`, "i").test(rawStyle)) ?? sheets[0];
-    const vp =
-      parsed.view_plan && typeof parsed.view_plan === "object"
-        ? (parsed.view_plan as Record<string, unknown>)
-        : {};
+  }
+  return {
+    style: null,
+    unsupportedReason: "An artist needs to review this design before we can make it.",
+    plan: defaultPlan,
+    confidence: 0,
+  };
+}
+
+function readJudge(
+  value: unknown,
+  sheets: { row: MatchRow; sheet: Buffer }[],
+  defaultPlan: GarmentProjectionPlan,
+): { style: string | null; unsupportedReason: string; plan: GarmentProjectionPlan; confidence: number } {
+  if (!value || typeof value !== "object") throw new Error("Judge response was not an object.");
+  const parsed = value as Record<string, unknown>;
+  const styleCodes = sheets.map((item) => item.row.style);
+  const rawStyle = typeof parsed.winner_style === "string" ? parsed.winner_style.trim() : "";
+  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+  const unsupportedReason =
+    typeof parsed.unsupported_reason === "string" && parsed.unsupported_reason.trim()
+      ? parsed.unsupported_reason.trim()
+      : "We cannot manufacture this garment because it does not match any style in our catalog.";
+  const matched = sheets.find((item) => item.row.style === rawStyle);
+  if (parsed.supported === false || !matched || matchNeedsReview(rawStyle, confidence, styleCodes)) {
+    const declined = parsed.supported === false || rawStyle.toLowerCase() === "none";
     return {
-      style: matched.row.style,
-      unsupportedReason: "",
-      plan: {
-        colorZoneMapping: stringArray(parsed.color_zone_mapping),
-        logoMapping: stringArray(parsed.logo_mapping),
-        textMapping: stringArray(parsed.text_mapping),
-        viewPlan: {
-          front: typeof vp.front === "string" && vp.front.trim() ? vp.front.trim() : defaultPlan.viewPlan.front,
-          back: typeof vp.back === "string" && vp.back.trim() ? vp.back.trim() : defaultPlan.viewPlan.back,
-          left: typeof vp.left === "string" && vp.left.trim() ? vp.left.trim() : defaultPlan.viewPlan.left,
-          right: typeof vp.right === "string" && vp.right.trim() ? vp.right.trim() : defaultPlan.viewPlan.right,
-        },
-      },
-    };
-  } catch {
-    if (/^none\b/i.test(cleaned)) {
-      const reason = cleaned.replace(/^none\s*:?\s*/i, "").trim();
-      return {
-        style: null,
-        unsupportedReason: reason || "We cannot manufacture this garment because it does not match any style in our catalog.",
-        plan: defaultPlan,
-      };
-    }
-    const known = sheets.find((item) => new RegExp(`\\b${item.row.style}\\b`, "i").test(cleaned)) ?? sheets[0];
-    return {
-      style: known.row.style,
-      unsupportedReason: "",
+      style: null,
+      unsupportedReason: declined
+        ? unsupportedReason
+        : "An artist needs to review this design before we can make it.",
       plan: defaultPlan,
+      confidence,
     };
   }
+  const vp =
+    parsed.view_plan && typeof parsed.view_plan === "object" ? (parsed.view_plan as Record<string, unknown>) : {};
+  return {
+    style: matched.row.style,
+    unsupportedReason: "",
+    confidence,
+    plan: {
+      colorZoneMapping: stringArray(parsed.color_zone_mapping),
+      logoMapping: stringArray(parsed.logo_mapping),
+      textMapping: stringArray(parsed.text_mapping),
+      viewPlan: {
+        front: typeof vp.front === "string" && vp.front.trim() ? vp.front.trim() : defaultPlan.viewPlan.front,
+        back: typeof vp.back === "string" && vp.back.trim() ? vp.back.trim() : defaultPlan.viewPlan.back,
+        left: typeof vp.left === "string" && vp.left.trim() ? vp.left.trim() : defaultPlan.viewPlan.left,
+        right: typeof vp.right === "string" && vp.right.trim() ? vp.right.trim() : defaultPlan.viewPlan.right,
+      },
+    },
+  };
 }
 
 function stringArray(value: unknown): string[] {
@@ -643,4 +629,77 @@ function segmentOf(gender: string): "adult" | "youth" | "ladies" | null {
   if (gender === "Women") return "ladies";
   if (gender === "Youth") return "youth";
   return null;
+}
+
+function judgeSchema(styleCodes: string[]): JsonSchema {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      supported: { type: "boolean" },
+      unsupported_reason: { type: "string" },
+      winner_style: { type: "string", enum: [...styleCodes, "none"] },
+      confidence: { type: "number" },
+      color_zone_mapping: stringList,
+      logo_mapping: stringList,
+      text_mapping: stringList,
+      view_plan: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          front: { type: "string" },
+          back: { type: "string" },
+          left: { type: "string" },
+          right: { type: "string" },
+        },
+        required: ["front", "back", "left", "right"],
+      },
+    },
+    required: [
+      "supported",
+      "unsupported_reason",
+      "winner_style",
+      "confidence",
+      "color_zone_mapping",
+      "logo_mapping",
+      "text_mapping",
+      "view_plan",
+    ],
+  };
+}
+
+function readDescribe(value: unknown): GarmentAnalysis | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as Record<string, unknown>;
+  const piece =
+    parsed.garment_piece === "bottom" || parsed.garment_piece === "one-piece" || parsed.garment_piece === "other"
+      ? parsed.garment_piece
+      : "top";
+  const supported = parsed.supported !== false && piece !== "one-piece" && piece !== "other";
+  const queries = Array.isArray(parsed.queries)
+    ? parsed.queries
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim())
+        .slice(0, 3)
+    : [];
+  const sleeves =
+    parsed.sleeves === "sleeveless" ||
+    parsed.sleeves === "short" ||
+    parsed.sleeves === "3/4" ||
+    parsed.sleeves === "long" ||
+    parsed.sleeves === "none"
+      ? parsed.sleeves
+      : "short";
+  return {
+    supported,
+    unsupportedReason: typeof parsed.unsupported_reason === "string" ? parsed.unsupported_reason.trim() : "",
+    queries,
+    garmentPiece: piece,
+    sleeves,
+    segment: parsed.segment === "ladies" || parsed.segment === "youth" ? parsed.segment : "adult",
+    logoLocations: stringArray(parsed.logo_locations),
+    textLocations: stringArray(parsed.text_locations),
+    hasButtons: Boolean(parsed.has_buttons),
+    colorPanels: typeof parsed.color_panels === "number" ? parsed.color_panels : 2,
+  };
 }
