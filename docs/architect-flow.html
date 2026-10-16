@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDL Express — architect walkthrough</title>
+  <style>
+    :root { color-scheme: light; --ink: #14202b; --muted: #5c6770; --line: #d3dce3; --bg: #eef3f6; --card: #fff; --accent: #1a78c2; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+    main { max-width: 920px; margin: 0 auto; padding: 32px 18px 80px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0; font-size: 16px; }
+    .lede { margin: 0 0 22px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; background: #fff; margin: 0 0 28px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #123; color: #fff; font-weight: 600; }
+    .step { position: relative; margin: 0 0 26px; }
+    .step:not(:last-child)::after { content: ""; position: absolute; left: 22px; bottom: -26px; width: 2px; height: 26px; background: var(--accent); }
+    .box { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .box h2 { padding: 12px 16px; background: #123; color: #fff; }
+    .box h2 span { color: #8ec8f0; font-weight: 500; margin-right: 8px; }
+    dl { margin: 0; }
+    dt { margin: 0; padding: 8px 16px 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+    dd { margin: 4px 16px 10px; }
+    pre { margin: 6px 0 0; padding: 10px 12px; background: #f6f8fa; border: 1px solid var(--line); border-radius: 6px; overflow: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+    .stop { border-color: #e10600; }
+    .stop h2 { background: #7a120c; }
+    code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>CDL Express, point to point</h1>
+  <p class="lede">Walk this top to bottom. Each box is one piece. Input, call, prompt, model output, and what the next box receives. Region is ap-southeast-2. No secrets are in this page.</p>
+
+  <table>
+    <thead><tr><th>Piece</th><th>What it is</th><th>Talks to</th></tr></thead>
+    <tbody>
+      <tr><td>Website</td><td>Next.js form. Customer uploads a photo and later submits name, email, size.</td><td>Our three POST routes below.</td></tr>
+      <tr><td>OpenAI</td><td>Reads photos. Model <code>gpt-6-sol</code>, reasoning <code>low</code>, strict JSON. Does not paint pictures.</td><td>Chat Completions. Env <code>OPENAI_API_KEY</code>, optional <code>OPENAI_MODEL</code>.</td></tr>
+      <tr><td>Catalog search</td><td>Lambda <code>momentec-catalog-search</code>. Vector search over products, colors, locations.</td><td><code>POST /search</code>, <code>POST /colors/nearest</code>. Header <code>X-API-Key</code>.</td></tr>
+      <tr><td>Garment renders</td><td>Momentec blank 3D views of a catalog style.</td><td><code>GET</code> preview URL with <code>{style}_{front|back|left|right}</code>.</td></tr>
+      <tr><td>Magnific</td><td>Paints the four views and, later, each proof mark. Model <code>gpt-image-2-edit</code>, quality <code>low</code>, resolution <code>1k</code>.</td><td>Magnific API. Env <code>MAGNIFIC_API_KEY</code>.</td></tr>
+      <tr><td>S3</td><td>Bucket <code>momentec-cdl-proofs-946033679274</code>. One folder per job.</td><td>Website writes the sheet and job. Proof Lambda writes the PDF and status.</td></tr>
+      <tr><td>Proof Lambda</td><td><code>momentec-cdl-proof</code>. Builds the PDF after the customer has already left.</td><td>S3, OpenAI, Magnific, catalog <code>/colors/nearest</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <section class="step"><article class="box">
+    <h2><span>1</span>Customer drops a photo</h2>
+    <dl>
+      <dt>Input</dt><dd>One jpg, png, or webp. Up to 8 photos. Only the first photo is used to guess category and gender, and only the first photo is described for catalog search.</dd>
+      <dt>What the browser does</dt><dd>Background removal runs in the browser at 512 px, only to make a mask. That mask is applied to the original and flattened on white, long edge capped at 1536 px. The server flattens any leftover transparency again before any model sees the file.</dd>
+      <dt>Output</dt><dd>A flattened photo, still on the page. Category and gender are still empty until step 2 returns.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>2</span>Guess category and gender</h2>
+    <dl>
+      <dt>Endpoint</dt><dd><code>POST /api/upload-ai-design/suggest</code></dd>
+      <dt>Input</dt><dd>Form field <code>reference</code>: the first photo.</dd>
+      <dt>Prompt</dt><dd><code>SUGGEST_PROMPT</code>. Pick a category from the garment cut, not from a team logo. Youth only if it is clearly a kids cut. Women for a ladies cut. Otherwise Men. Allowed values are the form’s category list and Men / Women / Youth.</dd>
+      <dt>Model output</dt><dd><pre>{ "category": "BASEBALL", "gender": "Men" }</pre></dd>
+      <dt>Output</dt><dd>Those two dropdowns are filled. If the customer already chose one, that choice is kept. Size, name, and email stay locked.</dd>
+      <dt>Failure</dt><dd>400 bad file, 422 or 502 the model could not read it, 503 no API key. The page stays usable. The customer picks the fields by hand.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>3</span>Make the four views</h2>
+    <dl>
+      <dt>Endpoint</dt><dd><code>POST /api/upload-ai-design/generate</code>. Max 300 seconds.</dd>
+      <dt>Input</dt><dd>Form fields <code>reference</code> (photo), <code>gender</code>, <code>category</code>. Both gender and category are required. An edit also sends <code>instruction</code>, <code>template</code> (the blank catalog 2x2), and <code>catalog</code> (the matched style JSON).</dd>
+      <dt>Output</dt><dd>JSON: base64 <code>images.front/back/left/right</code>, base64 <code>sheet</code>, <code>style</code>, <code>query</code>, <code>matches</code>, <code>plan</code>, <code>limits</code> (the customer note), <code>template</code>, <code>catalog</code>.</dd>
+      <dt>Stop</dt><dd>400 if gender or category is missing, or an edit has no template. 422 if the garment cannot be made or the match is not confident. 502 if Magnific fails. 503 if a required key is missing.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>4</span>OpenAI describes the photo</h2>
+    <dl>
+      <dt>Call</dt><dd>Chat Completions. Schema name <code>describe_garment</code>. Temperature is not sent. Reasoning effort <code>low</code>. One retry, then fail closed. No six-word fallback search.</dd>
+      <dt>Prompt</dt><dd><code>DESCRIBE_PROMPT</code>. Asks for catalog product names (Crew Neck Baseball Jersey, V-Neck Hockey Jersey, and so on), sleeve cut, visible logo places, visible text places. A one-piece singlet, dress, unitard, or similar cut must come back <code>supported: false</code> with a reason.</dd>
+      <dt>Model output, pass</dt><dd><pre>{
+  "supported": true,
+  "queries": ["V-Neck Hockey Jersey", "Long Sleeve Hockey Jersey", "Hockey Jersey"],
+  "garment_piece": "top",
+  "sleeves": "long",
+  "segment": "adult",
+  "logo_locations": ["Front Center Full"],
+  "text_locations": ["Left Short Sleeve"],
+  "has_buttons": false,
+  "confidence": 0.8
+}</pre></dd>
+      <dt>Model output, reject</dt><dd><pre>{
+  "supported": false,
+  "unsupported_reason": "This is a one-piece wrestling singlet."
+}</pre></dd>
+      <dt>Next</dt><dd>Pass goes to catalog search. Reject returns 422 with the model’s reason. The page stops. No Magnific call.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box stop">
+    <h2>Stop — cannot manufacture the garment</h2>
+    <dl>
+      <dt>When</dt><dd><code>supported</code> is false, or the piece is one-piece or other.</dd>
+      <dt>What the customer sees</dt><dd>The model’s reason. We do not append a hardcoded product list.</dd>
+      <dt>What we can make</dt><dd>Separate tops, bottoms, and catalog accessories. That rule lives in <code>DESCRIBE_PROMPT</code>, not in a fixed sentence on the page.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>5</span>Catalog search</h2>
+    <dl>
+      <dt>Endpoint</dt><dd><code>POST {catalog}/search</code>. The host is the catalog Lambda function URL. Header <code>X-API-Key</code>. Body is JSON, not query params.</dd>
+      <dt>Input</dt><dd>Each of up to three queries. <code>top_k</code> 12. Collection <code>products</code> only. <code>group_products_by_style</code> true. Filters: segment from the form gender (Men → adult, Women → ladies, Youth → youth), sport from the category uppercased.</dd>
+      <dt>Example body</dt><dd><pre>POST /search
+{
+  "query": "V-Neck Hockey Jersey",
+  "top_k": 12,
+  "collections": ["products"],
+  "group_products_by_style": true,
+  "product_filters": { "segment": "adult", "sport": "HOCKEY" }
+}</pre></dd>
+      <dt>Output</dt><dd>Styles with <code>style</code>, <code>name</code>, <code>brand</code>, <code>sport</code>, <code>segment</code>, <code>score</code>, <code>logo_locations</code>, <code>text_locations</code>, <code>color_zones</code>. Broken preview prefixes (UP, UFO, UPO, UPB, URS) are dropped. Partner prefixes are down-ranked. The list is cut to distinct cuts, then the top ones that actually return images.</dd>
+      <dt>Fallback</dt><dd>If the sport filter returns too few rows, search again without sport. Then without segment. Categories that are not sports (TEES, TOPS) often miss and take this path.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>6</span>Blank 2x2 of each candidate</h2>
+    <dl>
+      <dt>Call</dt><dd>Four GETs per style. The style and view are appended after <code>preview-</code>.</dd>
+      <dt>Example</dt><dd><pre>preview-228350_front
+preview-228350_back
+preview-228350_left
+preview-228350_right</pre></dd>
+      <dt>Output</dt><dd>One 960×1280 PNG per style. Cells are front, back, left, right, with a white cross. Up to three of these sheets go to the next step. If none of the preview URLs return, the page stops with 422.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>7</span>OpenAI picks the style and writes the plan</h2>
+    <dl>
+      <dt>Call</dt><dd>Chat Completions. Schema name <code>judge_garment</code>. <code>winner_style</code> is an enum of the candidate style codes plus <code>none</code>. One retry. Confidence below 0.6, <code>none</code>, or a style that is not in the candidate list stops the job. Magnific is not called.</dd>
+      <dt>Input</dt><dd>The customer photo, then each candidate 2x2 labeled with that style’s name, brand, logo locations, text locations, and color zones.</dd>
+      <dt>Prompt</dt><dd><code>JUDGE_AND_PLAN_PROMPT</code>. Pick the closest cut that can also print the visible logos and text. If the closest cut cannot print them, pick the next candidate that can. Map colors, logos, and text only onto that style’s allowed zones and locations. A logo with lettering inside it is one logo. Do not split the words into text and the picture into a separate graphic. Customer-facing <code>not_possible</code> and <code>can_do</code> are plain language, no style numbers, no codes like m2.</dd>
+      <dt>Model output</dt><dd><pre>{
+  "supported": true,
+  "winner_style": "228350",
+  "confidence": 0.74,
+  "color_zone_mapping": ["Body Color: scarlet #A31F2D"],
+  "logo_mapping": ["Front Center Full (m2): Hays Sluggers crest"],
+  "text_mapping": ["Left Short Sleeve (t24): HYB"],
+  "not_possible": [
+    { "mark": "small label at the front hem", "reason": "this style has no logo spot there" }
+  ],
+  "can_do": ["Hays Sluggers logo on the front", "number 10", "NAME on the back"],
+  "view_plan": { "front": "...", "back": "...", "left": "...", "right": "..." }
+}</pre></dd>
+      <dt>Code after the model</dt><dd><code>filterPlanToAllowedCatalog</code> drops any plan line that does not name an allowed code or place. <code>snapPlanColors</code> sends each hex to <code>POST /colors/nearest</code> for that brand (Augusta, High Five, PG, and New Era use the Holloway chips). Tonal and camo chips are skipped. If that call fails, the same nearest-chip search runs on the 173 colors copied into the app. There is no distance cutoff. The closest solid chip wins.</dd>
+      <dt>If the winner still cannot print a real mark</dt><dd>A hem tag does not count. If a real logo or text was left off, and another of the three candidates covers more of the detected places, that candidate is judged again by itself and becomes the garment. The four views are then made from that style.</dd>
+      <dt>Customer note</dt><dd><code>limits</code> is two lines when the model returned them. First what was included. Then what was left off and why. Style numbers and location codes are stripped before display. Example: “We made this with the Hays Sluggers logo on the front. We couldn't add the small label at the front hem. This style has no place for a logo there.”</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box stop">
+    <h2>Stop — not confident</h2>
+    <dl>
+      <dt>When</dt><dd><code>winner_style</code> is <code>none</code>, is not one of the candidates, or confidence is under 0.6. Also when the JSON is still bad after one retry.</dd>
+      <dt>Output</dt><dd>422. Message is the model’s reason, or “An artist needs to review this design before we can make it.” No image is painted.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>8</span>Magnific paints the four views</h2>
+    <dl>
+      <dt>Call</dt><dd>Magnific <code>gpt-image-2-edit</code>. Image 1 is the winning style’s blank 2x2. Image 2 is the customer photo. Prompt is <code>buildCatalogProjectionPrompt</code>. Poll up to 300 seconds.</dd>
+      <dt>What the prompt demands</dt><dd>Keep Image 1’s cut, collar, sleeves, buttons, hem, and 2x2 layout. Paint the snapped Momentec hex colors. Paint only the logos and text listed in the plan. If a mark is not on an allowed place, do not draw it and do not move it. A lettering-inside-a-crest logo is one mark.</dd>
+      <dt>Output</dt><dd>One 2x2 PNG. The site splits it on the white cross into front, back, left, and right and shows those four pictures, plus the customer note from step 7.</dd>
+      <dt>Edit</dt><dd>“Apply this edit” sends the same blank template as Image 1 and adds the customer’s note as one line. It does not invent a new garment. If the template is missing, the route returns 400.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>9</span>Customer submits</h2>
+    <dl>
+      <dt>Endpoint</dt><dd><code>POST /api/upload-ai-design/submit</code></dd>
+      <dt>Input</dt><dd>The finished sheet PNG, gender, size, category, name, email, message, and the <code>catalog</code> JSON from step 3 (style, locations, zones, plan).</dd>
+      <dt>S3 keys</dt><dd>Folder name is <code>job-2026-10-16T21-04-00Z_{uuid}</code> so the console list sorts by time. Files: <code>{jobId}/sheet.png</code>, <code>{jobId}/job.json</code>. Older jobs are a bare uuid and still open.</dd>
+      <dt>Then</dt><dd>Lambda invoke, <code>InvocationType: Event</code>, payload <code>{ bucket, jobId }</code>. The image is not in the event. The HTTP response is 202 with <code>{ "jobId": "..." }</code>. The customer can close the page.</dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>10</span>Proof Lambda</h2>
+    <dl>
+      <dt>Function</dt><dd><code>momentec-cdl-proof</code>. Node, 2048 MB, 15 minutes. Handler <code>index.handler</code>. It does not import the Next.js app.</dd>
+      <dt>Input</dt><dd><code>{jobId}/sheet.png</code> and <code>{jobId}/job.json</code> (gender, size, customer name, message, catalog style, locations, zones, plan).</dd>
+      <dt>OpenAI</dt><dd>Schema name <code>decoration_list</code>. Prompt <code>DECORATION_LIST_PROMPT</code>. It reads the sheet and returns fill colors, team marks, and roster marks, each with a location code, hex, and a cell. One retry. A bad response fails the job. Marks that are not on the style’s logo or text locations are dropped. Fill colors that are not on the style’s color zones are dropped. Heights snap to that location’s allowed inch sizes.</dd>
+      <dt>Colors</dt><dd>Each hex is snapped again with <code>POST /colors/nearest</code>, then the local 173-color list if that call is not configured. The PDF prints the Momentec name.</dd>
+      <dt>Pictures</dt><dd>Front and back on the PDF are crops of the approved sheet. They are not redrawn. Magnific isolates each allowed mark on white. Those mark images can still misspell words. That is a known limit.</dd>
+      <dt>PDF</dt><dd><code>{jobId}/proof.pdf</code> and <code>{jobId}/status.json</code> (<code>running</code>, <code>done</code>, or <code>failed</code>). Page 1 uses the real style number, garment name, size, customer name, and customer message. REF#, ecom order number, and artist are still the sample values and are drawn on red.</dd>
+      <dt>Example status</dt><dd><pre>{ "state": "done", "pdf": "job-2026-10-16T21-04-00Z_.../proof.pdf" }</pre></dd>
+    </dl>
+  </article></section>
+
+  <section class="step"><article class="box">
+    <h2><span>11</span>What is deliberately not in this POC</h2>
+    <dl>
+      <dt>Not built</dt><dd>Comms callback. PMS or CMYK on the PDF. Replacing the sample REF#, ecom order number, and artist. Step Functions. A queue. Auth on the public generate routes. The customer does not download the PDF from the site.</dd>
+      <dt>3D button</dt><dd><code>POST /api/upload-ai-design/model</code> is a separate Magnific path. It is not part of matching or the proof.</dd>
+    </dl>
+  </article></section>
+</main>
+</body>
+</html>
