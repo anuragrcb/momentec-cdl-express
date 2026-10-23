@@ -18,8 +18,8 @@ const SHEET_ASPECT_RATIO = "standard_3_2";
 export const EDIT_NEEDS_VIEWS = "Make the front and back views before applying an edit.";
 
 const ANGLE: Record<ArtworkView, string> = {
-  front: "the FRONT of that one solid 3D garment, orthographic, straight on. The chest faces the camera. Sleeves have thickness and come slightly forward. The collar is an opening, not a flat ring",
-  back: "the BACK of the same solid 3D garment, orthographic, turned 180 degrees. The back panel faces the camera. Sleeves keep the same thickness. The collar opening is still a hole",
+  front: "the FRONT of that one solid 3D garment, orthographic, straight on. The chest faces the camera. Sleeves have thickness and come slightly forward, so the front half of each sleeve's outer side is visible. The collar is an opening, not a flat ring",
+  back: "the BACK of the same solid 3D garment, orthographic, turned 180 degrees. The back panel faces the camera. Sleeves keep the same thickness, so the back half of each sleeve's outer side is visible. The collar opening is still a hole",
 };
 
 export interface DesignReference {
@@ -66,6 +66,15 @@ Critical color rules (MUST follow the snapped Momentec catalog hex codes below):
 Placement rules (custom sublimated design — logos and text may go anywhere on the garment):
 - Render every logo, patch, graphic, wordmark, name, and number from the customer's design, in the same place it sits on the customer's design, projected onto the matching spot of the Image 1 garment.
 - Do not drop or move a mark because the catalog style does not list that placement. Do not invent marks that are not in the customer's design.
+
+Wrap-around and partly visible areas (sleeves, shoulders, side panels, underarms, collar, cuffs, hem):
+- Front and back are two camera angles of ONE continuous printed garment. Every fabric surface you can see in either cell must be fully painted: sleeves, sleeve undersides, shoulders, side panels, underarms, collar, cuffs, and hem. No area may keep Image 1's blank template color, and no gaps, seams of bare fabric, or unfinished patches may appear, unless the customer's design is that exact color there.
+- All-over sublimation patterns, gradients, stripes, and color blocks continue unbroken across shoulders, side seams, and sleeves, and line up where the front view meets the back view. Do not restart, mirror, or simplify a pattern on the sleeves.
+- If the customer's design does not show a surface (for example the back, a sleeve, or a side), continue the same fabric colors and pattern onto it. Leave only printed marks off when none are shown there.
+- Orientation: the wearer's RIGHT sleeve is on the viewer's LEFT in the FRONT cell and on the viewer's RIGHT in the BACK cell. The wearer's LEFT sleeve is on the viewer's RIGHT in the FRONT cell and on the viewer's LEFT in the BACK cell. Put every sleeve mark on the correct sleeve in both cells.
+- A logo, number, or text on a sleeve, shoulder, or side wraps around the 3D surface. Draw it curved and foreshortened to follow that surface. In each cell, draw exactly the part of the mark that this camera angle would see, even if that is only half of it. Never skip a mark because it is only partly visible, never shrink it to fit, and never move it to the chest or back panel.
+- A mark seen in both cells keeps the same artwork, digits, letters, size, and colors in both. The visible parts must match up as one mark.
+- Small marks on sleeves and shoulders must stay crisp and legible: solid edges, correct digits and letters, no smudges, blurs, or melted shapes.
 
 Catalog color-zone & decoration placement specification (mapped from the customer's design onto style ${match.style}):
 - Color zones:
@@ -185,7 +194,8 @@ export async function generateMissingSheet(
       { buffer: match.templateSheet, mimeType: "image/png" },
       ...references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
     ],
-    { aspectRatio: SHEET_ASPECT_RATIO },
+    // 2k keeps small sleeve and shoulder marks legible; on the edit endpoint it does not change the price.
+    { aspectRatio: SHEET_ASPECT_RATIO, resolution: "2k" },
   );
   return { sheet, views: await splitSheet(sheet), match };
 }

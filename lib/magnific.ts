@@ -285,7 +285,7 @@ const GPT_EDIT_POLL_MS = 300_000;
 export async function generateGptImageSheet(
   prompt: string,
   references: { buffer: Buffer; mimeType: string }[],
-  options?: { aspectRatio?: string; referenceUrls?: string[] },
+  options?: { aspectRatio?: string; resolution?: "1k" | "2k" | "4k"; referenceUrls?: string[] },
 ): Promise<Buffer> {
   const apiKey = process.env.MAGNIFIC_API_KEY;
   if (!apiKey) throw new Error("MAGNIFIC_API_KEY is not set.");
@@ -299,7 +299,7 @@ export async function generateGptImageSheet(
     prompt,
     reference_images: referenceImages,
     num_images: 1,
-    resolution: "1k",
+    resolution: options?.resolution ?? "1k",
     aspect_ratio: options?.aspectRatio ?? "traditional_3_4",
     quality: "low",
     output_format: "png",
