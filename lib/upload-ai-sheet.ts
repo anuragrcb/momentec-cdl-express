@@ -39,24 +39,12 @@ export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenc
   const logoLines =
     match.plan.logoMapping.length > 0
       ? match.plan.logoMapping.map((line) => `  - ${line}`).join("\n")
-      : "  - NONE (do NOT place any logos, crests, patches, or graphics anywhere on the garment, even if present on Image 2).";
+      : "  - Copy any logos, crests, patches, or graphics shown in the customer's design at the same placement.";
 
   const textLines =
     match.plan.textMapping.length > 0
       ? match.plan.textMapping.map((line) => `  - ${line}`).join("\n")
-      : "  - NONE (do NOT place any text, wordmarks, names, or numbers anywhere on the garment, even if present on Image 2).";
-
-  const allowedLogoList =
-    match.winner.logo_locations
-      .filter((l) => !l.legacy && (l.name || l.code))
-      .map((l) => (l.code && l.name ? `${l.name} (${l.code})` : l.name || l.code))
-      .join(", ") || "none";
-
-  const allowedTextList =
-    match.winner.text_locations
-      .filter((t) => !t.legacy && (t.name || t.code))
-      .map((t) => (t.code && t.name ? `${t.name} (${t.code})` : t.name || t.code))
-      .join(", ") || "none";
+      : "  - Copy any text, wordmarks, names, or numbers shown in the customer's design at the same placement.";
 
   return `Project the customer's custom garment design onto the exact 2x2 3D catalog garment template shown in Image 1.
 
@@ -75,18 +63,16 @@ Critical color rules (MUST follow the snapped Momentec catalog hex codes below):
 - Every color in the specification below has already been matched to the closest manufacturable Momentec brand color and #RRGGBB hex code for style ${match.style} (${match.winner.brand || "Momentec"}).
 - Paint every fabric color zone, collar/trim, button, logo, wordmark, and number using the exact Momentec color name and #RRGGBB hex code listed below — even if Image 2 shows a different raw shade or hue. Do NOT copy unsnapped shades from Image 2 when a Momentec hex code is specified below.
 
-Critical placement rules (ONLY supported catalog locations for style ${match.style} may be decorated):
-- Style ${match.style} ONLY supports these logo locations: ${allowedLogoList}.
-- Style ${match.style} ONLY supports these text/number locations: ${allowedTextList}.
-- Render ONLY the logos listed under "Allowed logo placements to apply" and ONLY the text/numbers listed under "Allowed text/number placements to apply" below.
-- If Image 2 has any logo, patch, graphic, wordmark, name, or number on a placement that is NOT explicitly listed below, DO NOT draw it — leave that area of the garment completely blank/clean fabric.
+Placement rules (custom sublimated design — logos and text may go anywhere on the garment):
+- Render every logo, patch, graphic, wordmark, name, and number from the customer's design, in the same place it sits on the customer's design, projected onto the matching spot of the Image 1 garment.
+- Do not drop or move a mark because the catalog style does not list that placement. Do not invent marks that are not in the customer's design.
 
 Catalog color-zone & decoration placement specification (mapped from the customer's design onto style ${match.style}):
 - Color zones:
 ${colorLines}
-- Allowed logo placements to apply:
+- Logo placements to apply:
 ${logoLines}
-- Allowed text/number placements to apply:
+- Text/number placements to apply:
 ${textLines}
 
 Per-view projection breakdown:

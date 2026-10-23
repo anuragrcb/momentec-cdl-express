@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { filterPlanToAllowedCatalog, replaceSnappedColors, snapToBrandColorLocal } from "./colors";
-import { coversPlacements, customerLimitNote } from "./manufacture-limits";
+import { customerLimitNote } from "./manufacture-limits";
 import { readGarmentSuggestion } from "./mark-measure";
 import { matchNeedsReview } from "./match-decision";
 import { parseStoredProofJob, proofObjectKeys, readProofCatalog, readProofCustomer } from "./proof-job";
@@ -85,15 +85,17 @@ const filteredPlan = filterPlanToAllowedCatalog(
     ],
     viewPlan: { front: "front", back: "back", left: "left", right: "right" },
   },
-  {
-    logo_locations: [{ code: "m2", name: "Front Center Full", legacy: false }],
-    text_locations: [{ code: "t7", name: "Back Center", legacy: false }],
-    color_zones: [{ code: "SUB_FIRST_BODY_COLOR", name: "Body Color" }],
-  },
+  { color_zones: [{ code: "SUB_FIRST_BODY_COLOR", name: "Body Color" }] },
 );
 assert.deepEqual(filteredPlan.colorZoneMapping, ["Body Color (SUB_FIRST_BODY_COLOR): WHITE (#FFFFFF)"]);
-assert.deepEqual(filteredPlan.logoMapping, ["Front Center Full (m2): Tiger crest on front"]);
-assert.deepEqual(filteredPlan.textMapping, ["Back Center (t7): 24 in SCARLET (#A31F2D)"]);
+assert.deepEqual(filteredPlan.logoMapping, [
+  "Front Center Full (m2): Tiger crest on front",
+  "Left Short Sleeve (m10): Sleeve patch on left view",
+]);
+assert.deepEqual(filteredPlan.textMapping, [
+  "Back Center (t7): 24 in SCARLET (#A31F2D)",
+  "Left Sleeve Text (t55): TIGERS on sleeve",
+]);
 
 assert.equal(matchNeedsReview("none", 0.9, ["228137"]), true);
 assert.equal(matchNeedsReview("999999", 0.95, ["228137"]), true);
@@ -101,8 +103,6 @@ assert.equal(matchNeedsReview("228137", 0.59, ["228137"]), true);
 assert.equal(matchNeedsReview("228137", 0.6, ["228137"]), false);
 assert.deepEqual(readGarmentSuggestion("BASEBALL", "Women"), { category: "BASEBALL", gender: "Women" });
 assert.equal(readGarmentSuggestion("CRICKET", "Men"), null);
-assert.equal(coversPlacements(["Front Center Full"], ["Upper Left Chest"]), 0);
-assert.equal(coversPlacements(["Front Center Full"], ["Front Center Full"]), 1);
 assert.equal(customerLimitNote([], ["Upper left chest logo"]), "We made this with Upper left chest logo.");
 assert.equal(
   customerLimitNote(

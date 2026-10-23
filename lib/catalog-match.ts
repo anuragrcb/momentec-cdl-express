@@ -1,7 +1,7 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import sharp from "sharp";
 import { filterPlanToAllowedCatalog, snapPlanColors } from "./colors";
-import { coversPlacements, customerLimitNote, isTrimTag, type PrintLimit } from "./manufacture-limits";
+import { customerLimitNote, type PrintLimit } from "./manufacture-limits";
 import { matchNeedsReview } from "./match-decision";
 import { completeJson, type JsonSchema } from "./openai-json";
 
@@ -52,18 +52,20 @@ Reply with ONLY valid JSON in this exact shape:
 logo_locations and text_locations must list only placements that are actually visible. Use an empty array when none are visible. confidence is 0 to 1.`;
 
 const JUDGE_AND_PLAN_PROMPT = `Image 1 is the customer's uploaded garment design.
-Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Bottom-Left: Left side, Bottom-Right: Right side) of one candidate Momentec catalog style, accompanied by its catalog name, allowed logo placements, allowed text placements, and color zones.
+Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Bottom-Left: Left side, Bottom-Right: Right side) of one candidate Momentec catalog style, accompanied by its catalog name, common logo placements, common text placements, and color zones.
+
+This is a fully custom sublimated design, so a logo or text can be printed anywhere on the garment. The listed logo and text placements are only common reference spots. They are NOT limits.
 
 Your task has two parts:
-1. Pick the closest candidate catalog style that matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem) and can print the customer's visible logos and text. If the closest cut cannot print those marks, choose the next closest candidate that can.
+1. Pick the closest candidate catalog style that matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem). Do NOT choose or reject a style because of its listed logo or text placements.
    If NONE of the candidate catalog styles match the physical construction of Image 1 (for example, Image 1 is a one-piece singlet/bodysuit/dress or a completely different garment cut than all candidates), set "supported": false and explain why in "unsupported_reason".
-2. For the winning catalog style, map the customer's uploaded design onto ONLY that catalog garment's allowed color_zones, allowed logo_locations, and allowed text_locations so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
+2. For the winning catalog style, map the customer's uploaded design onto that catalog garment so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
    - In "color_zone_mapping", assign ONLY the color zones that exist in the winning style's color_zones list (such as Body Color, Accent 1, Accent 2, Button Color, Collar/Trim) to the color, gradient, or sublimation pattern visible on the customer's garment (always include a 6-digit #RRGGBB hex code for every color). Omit any color panel that does not exist on the winning style.
-   - In "logo_mapping", include a logo/crest/patch/graphic ONLY if the winning style's allowed logo_locations list supports the physical placement where that logo appears on the customer's garment (include the exact location code and name from the winning style's allowed logo_locations, what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on). A logo that has lettering inside it is one logo. Keep the words and the picture together. Do not file the words as text and the picture as a separate graphic. If a logo appears on a placement NOT in the winning style's allowed logo_locations, OMIT the whole logo — do not move it to another location and do not invent logos.
-   - In "text_mapping", include a wordmark/name/number ONLY if it is separate from a logo and the winning style's allowed text_locations list supports that placement (include the exact location code and name from the winning style's allowed text_locations, the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on). Do not repeat words that are already part of a logo. If text or a number appears on a placement NOT in the winning style's allowed text_locations, OMIT it completely — do not move it to another location and do not invent text.
-   - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention ONLY the logos and text/numbers that were kept in "logo_mapping" and "text_mapping". If any visible logo, text, or number on Image 1 sits on an unsupported placement for the winning style, explicitly state in that view's plan to leave that area clean/blank and omit that mark.
+   - In "logo_mapping", include EVERY visible logo/crest/patch/graphic on the customer's garment. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's logo_locations when one fits that spot), what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on. A logo that has lettering inside it is one logo. Keep the words and the picture together. Do not file the words as text and the picture as a separate graphic. Keep each logo where the customer placed it. Do not invent logos.
+   - In "text_mapping", include EVERY visible wordmark/name/number that is separate from a logo. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's text_locations when one fits that spot), the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on. Do not repeat words that are already part of a logo. Keep each mark where the customer placed it. Do not invent text.
+   - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention every logo and text/number from "logo_mapping" and "text_mapping" on the view where it appears.
    - Color formatting rule: whenever you reference any color in "color_zone_mapping", "logo_mapping", "text_mapping", or "view_plan", always include its 6-digit "#RRGGBB" hex code (for example, "purple (#4B1D70)") so every color can be snapped to the manufacturer's official brand palette before rendering.
-   - "not_possible" and "can_do" are shown to the customer. Write them in plain words a customer understands. Say what mark is left off and why, and what will still be printed. A logo and the lettering inside it are one mark. Do not say the words can be printed and the picture cannot. Do not include style numbers or location codes such as m2 or t22. Leave "not_possible" empty when nothing visible is left off.
+   - "not_possible" and "can_do" are shown to the customer. Write them in plain words a customer understands. "can_do" says what will be printed. A logo and the lettering inside it are one mark. Do not include style numbers or location codes such as m2 or t22. Leave "not_possible" empty unless a mark truly cannot be made (for example, it is unreadable). Never leave a mark off because of where it sits.
 
 Reply with ONLY valid JSON in this exact shape:
 {
@@ -211,31 +213,13 @@ export async function matchCatalogGarment(
     throw new CatalogMatchError(reason, 422, query, matches);
   }
 
-  let chosen = comparable.find((item) => item.row.style === judged.style);
+  const chosen = comparable.find((item) => item.row.style === judged.style);
   if (!chosen) {
     const reason = "An artist needs to review this design before we can make it.";
     console.log("closest garment", "none (unmatched)", reason);
     throw new CatalogMatchError(reason, 422, query, matches);
   }
-  let planSource = judged;
-  const picked = chosen;
-  const missedRealMarks = judged.notPossible.some((item) => !isTrimTag(`${item.mark} ${item.reason}`));
-  if (missedRealMarks) {
-    const winnerScore = placementCoverage(picked.row, analysis);
-    const better = comparable
-      .filter((item) => item.row.style !== picked.row.style)
-      .map((item) => ({ item, score: placementCoverage(item.row, analysis) }))
-      .filter((item) => item.score > winnerScore)
-      .sort((a, b) => b.score - a.score)[0];
-    if (better) {
-      console.log("closest garment retry", better.item.row.style, better.score, "vs", winnerScore);
-      const retry = await chooseStyleAndPlan(openaiKey, photoBytes, mimeType, analysis, [better.item]);
-      if (retry.style === better.item.row.style) {
-        chosen = better.item;
-        planSource = retry;
-      }
-    }
-  }
+  const planSource = judged;
   const filteredPlan = filterPlanToAllowedCatalog(planSource.plan, chosen.row);
   const snappedPlan = await snapPlanColors(filteredPlan, chosen.row.brand);
   console.log(
@@ -381,15 +365,6 @@ function rankCandidates(batches: MatchRow[][], analysis: GarmentAnalysis): Match
     let score = row.score ?? 0;
     if (bestRank === 0) score += 0.06;
     else if (bestRank === 1) score += 0.02;
-
-    const logoNames = new Set(row.logo_locations.map((l) => (l.name ?? "").toLowerCase()));
-    const textNames = new Set(row.text_locations.map((t) => (t.name ?? "").toLowerCase()));
-    for (const loc of analysis.logoLocations) {
-      if (logoNames.has(loc.toLowerCase())) score += 0.025;
-    }
-    for (const loc of analysis.textLocations) {
-      if (textNames.has(loc.toLowerCase())) score += 0.025;
-    }
 
     const name = row.name;
     if (analysis.sleeves === "sleeveless") {
@@ -562,7 +537,7 @@ async function chooseStyleAndPlan(
         .join(", ") || "none";
     return [
       {
-        text: `Candidate style ${row.style}: "${row.name}" (Brand: ${row.brand}, Sport: ${row.sport}, Segment: ${row.segment}). Allowed logo locations: ${logos}. Allowed text locations: ${texts}. Color zones: ${zones}. 2x2 views (front, back, left, right):`,
+        text: `Candidate style ${row.style}: "${row.name}" (Brand: ${row.brand}, Sport: ${row.sport}, Segment: ${row.segment}). Common logo locations: ${logos}. Common text locations: ${texts}. Color zones: ${zones}. 2x2 views (front, back, left, right):`,
       },
       { data: sheet.toString("base64"), mimeType: "image/png" },
     ];
@@ -651,12 +626,6 @@ function readJudge(
       },
     },
   };
-}
-
-function placementCoverage(row: MatchRow, analysis: GarmentAnalysis): number {
-  const logos = row.logo_locations.filter((item) => !item.legacy).map((item) => item.name ?? "");
-  const texts = row.text_locations.filter((item) => !item.legacy).map((item) => item.name ?? "");
-  return coversPlacements(analysis.logoLocations, logos) + coversPlacements(analysis.textLocations, texts);
 }
 
 function readPrintLimits(value: unknown): PrintLimit[] {

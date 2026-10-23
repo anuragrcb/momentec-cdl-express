@@ -193,7 +193,7 @@ preview-228137_right</pre></dd>
           <dt>Prompt or call</dt>
           <dd>
             1. <code>JUDGE_AND_PLAN_PROMPT</code>: pick the style whose cut matches (or set <code>supported: false</code>). Map the upload onto <strong>only</strong> the winning style’s allowed <code>color_zones</code>, <code>logo_locations</code>, and <code>text_locations</code>, with a 6-digit <code>#RRGGBB</code> hex code on every color. Any logo, wordmark, or number sitting on a placement the winning style does not support is omitted.<br>
-            2. <code>filterPlanToAllowedCatalog</code>: strips any entry in <code>colorZoneMapping</code>, <code>logoMapping</code>, or <code>textMapping</code> that does not match an active catalog code or name on the winning style.<br>
+            2. <code>filterPlanToAllowedCatalog</code>: strips any entry in <code>colorZoneMapping</code> that does not match a color zone on the winning style. Logo and text entries are kept as-is, because a custom design can place them anywhere.<br>
             3. <code>snapPlanColors</code> → <code>POST /colors/nearest</code> (with local CIE Lab ΔE fallback over the 173 Momentec brand colors): snaps every <code>#RRGGBB</code> hex in the plan to the closest solid Momentec color for the winning style’s brand (skipping tonal/camo chips) and rewrites the plan with official Momentec color names and hex codes.
           </dd>
           <dt>Out</dt>

@@ -1,20 +1,5 @@
 export type PrintLimit = { mark: string; reason: string };
 
-export function coversPlacements(detected: string[], allowed: string[]): number {
-  return detected.filter((name) => name.trim() && allowed.some((spot) => samePlace(name, spot))).length;
-}
-
-export function isTrimTag(text: string): boolean {
-  return /\b(hem|jock|size tag|manufacturer|care label|woven label)\b/i.test(text);
-}
-
-function samePlace(detected: string, allowed: string): boolean {
-  const left = detected.trim().toLowerCase();
-  const right = allowed.trim().toLowerCase();
-  if (!left || !right) return false;
-  return left === right || left.includes(right) || right.includes(left);
-}
-
 export function customerLimitNote(notPossible: PrintLimit[], canDo: string[]): string {
   const omitted = notPossible
     .filter((item) => item.mark && item.reason)

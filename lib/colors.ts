@@ -295,14 +295,9 @@ export function filterPlanToAllowedCatalog<
   },
 >(
   plan: T,
-  row: {
-    logo_locations: { code?: string; name?: string; legacy?: boolean }[];
-    text_locations: { code?: string; name?: string; legacy?: boolean }[];
-    color_zones: { code?: string; name?: string }[];
-  },
+  row: { color_zones: { code?: string; name?: string }[] },
 ): T {
-  const activeLogos = row.logo_locations.filter((l) => !l.legacy && (l.code || l.name));
-  const activeTexts = row.text_locations.filter((t) => !t.legacy && (t.code || t.name));
+  // Custom designs can print logos and text anywhere, so only color zones are limited to the catalog.
   const activeZones = row.color_zones.filter((z) => z.code || z.name);
 
   return {
@@ -311,8 +306,6 @@ export function filterPlanToAllowedCatalog<
       activeZones.length > 0
         ? plan.colorZoneMapping.filter((line) => matchesCatalogSlot(line, activeZones))
         : plan.colorZoneMapping,
-    logoMapping: plan.logoMapping.filter((line) => matchesCatalogSlot(line, activeLogos)),
-    textMapping: plan.textMapping.filter((line) => matchesCatalogSlot(line, activeTexts)),
   };
 }
 
