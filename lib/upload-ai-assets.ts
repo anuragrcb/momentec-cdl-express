@@ -248,8 +248,8 @@ export async function buildAssetSvgs(sources: AssetSource[]): Promise<{ files: {
 
 export async function buildGarmentModel(sources: AssetSource[]): Promise<Buffer> {
   const byView = new Map(sources.map((source) => [source.view, source]));
-  const ordered = (["front", "left", "back", "right"] as const).map((view) => byView.get(view));
-  if (ordered.some((source) => !source)) throw new Error("Make the four views before opening the 3D view.");
+  const ordered = (["front", "back"] as const).map((view) => byView.get(view));
+  if (ordered.some((source) => !source)) throw new Error("Make the front and back views before opening the 3D view.");
 
   const client = await mcpClient();
   const views: Record<string, string> = {};

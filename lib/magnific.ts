@@ -6,7 +6,7 @@
 // Scope note: prepareArtwork touches the flat 2D reference photo only
 // (background removal + a faithful upscale). It does NOT vectorize the
 // design or produce cut-piece geometry. generateGptImageSheet is a separate
-// call used by the upload-design 2x2 sheet flow.
+// call used by the upload-design front/back sheet flow.
 //
 // Same key source + honest-fallback pattern as lib/gemini.ts: if
 // MAGNIFIC_API_KEY isn't set, or any call fails/times out, we fall back to

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { CatalogMatchError, type CatalogMatchResult } from "@/lib/catalog-match";
-import { generateMissingSheet, readEditMatch, SHEET_VIEWS, type ArtworkView, type DesignReference } from "@/lib/upload-ai-sheet";
+import {
+  EDIT_NEEDS_VIEWS,
+  generateMissingSheet,
+  readEditMatch,
+  SHEET_VIEWS,
+  type ArtworkView,
+  type DesignReference,
+} from "@/lib/upload-ai-sheet";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -38,7 +45,7 @@ export async function POST(req: NextRequest) {
   const edit = await readEdit(form, instruction);
   if (edit instanceof NextResponse) return edit;
   if (!edit && (!gender.trim() || !category.trim())) {
-    return NextResponse.json({ error: "Choose a category and a gender before making the four views." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a category and a gender before making the front and back views." }, { status: 400 });
   }
 
   try {
@@ -68,7 +75,7 @@ export async function POST(req: NextRequest) {
         : {}),
     });
   } catch (err) {
-    if (err instanceof Error && err.message === "Make the four views before applying an edit.") {
+    if (err instanceof Error && err.message === EDIT_NEEDS_VIEWS) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     if (err instanceof CatalogMatchError) {
@@ -95,10 +102,10 @@ async function readEdit(form: FormData, instruction: string): Promise<CatalogMat
   const templateValue = form.get("template");
   const catalogValue = form.get("catalog");
   if (!(templateValue instanceof File) || templateValue.size === 0 || typeof catalogValue !== "string") {
-    return NextResponse.json({ error: "Make the four views before applying an edit." }, { status: 400 });
+    return NextResponse.json({ error: EDIT_NEEDS_VIEWS }, { status: 400 });
   }
   const match = readEditMatch(catalogValue, Buffer.from(await templateValue.arrayBuffer()));
-  if (!match) return NextResponse.json({ error: "Make the four views before applying an edit." }, { status: 400 });
+  if (!match) return NextResponse.json({ error: EDIT_NEEDS_VIEWS }, { status: 400 });
   return match;
 }
 

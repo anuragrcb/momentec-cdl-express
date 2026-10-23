@@ -11,11 +11,11 @@ const MAX_SHEET_BYTES = 25 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
-  if (!form) return Response.json({ error: "Make the four views first." }, { status: 400 });
+  if (!form) return Response.json({ error: "Make the front and back views first." }, { status: 400 });
 
   const sheetFile = form.get("sheet");
   if (!(sheetFile instanceof File) || sheetFile.size === 0) {
-    return Response.json({ error: "Make the four views first." }, { status: 400 });
+    return Response.json({ error: "Make the front and back views first." }, { status: 400 });
   }
   if (sheetFile.size > MAX_SHEET_BYTES) {
     return Response.json({ error: "That design is too large to upload." }, { status: 400 });

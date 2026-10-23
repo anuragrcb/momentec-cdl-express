@@ -14,8 +14,6 @@ const ACCEPT_RE = /\.(jpe?g|png|webp)$/i;
 const VIEWS = [
   { id: "front", label: "Front" },
   { id: "back", label: "Back" },
-  { id: "left", label: "Left" },
-  { id: "right", label: "Right" },
 ] as const;
 
 const MAX_REFERENCES = 8;
@@ -25,7 +23,7 @@ type ViewFile = { file: File; url: string; ready: boolean };
 type ViewMap = Record<ViewId, ViewFile | null>;
 type Reference = { id: string; file: File; url: string; ready: boolean; source: File };
 
-const EMPTY_VIEWS: ViewMap = { front: null, back: null, left: null, right: null };
+const EMPTY_VIEWS: ViewMap = { front: null, back: null };
 
 function categoryLabel(value: string) {
   return value.toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
@@ -245,7 +243,7 @@ export function UploadAiDesignModal() {
     for (const file of files) body.append("reference", file);
     if (instruction) {
       if (!templateRef.current || !catalogRef.current) {
-        setFileError("Make the four views before applying an edit.");
+        setFileError("Make the front and back views before applying an edit.");
         return;
       }
       body.append("instruction", instruction);
@@ -309,7 +307,7 @@ export function UploadAiDesignModal() {
 
   function generateRest() {
     if (!gender || !category) {
-      setFileError("Choose a category and a gender before making the four views.");
+      setFileError("Choose a category and a gender before making the front and back views.");
       return;
     }
     const ready = references.filter((item) => item.ready).map((item) => item.file);
@@ -395,7 +393,7 @@ export function UploadAiDesignModal() {
     if (fieldsLocked || preparing) return;
     const sheet = sheetRef.current;
     if (!sheet || !VIEWS.every((view) => views[view.id]?.ready)) {
-      setFileError("Make the four views before uploading the design.");
+      setFileError("Make the front and back views before uploading the design.");
       return;
     }
     const fit = readGarmentFit(gender, size);
@@ -434,7 +432,8 @@ export function UploadAiDesignModal() {
 
   const viewCount = VIEWS.filter((view) => views[view.id]).length;
   const matchInputsLocked = isRemovingBackground || generating || preparing || uploaded;
-  const fieldsLocked = viewCount < 4 || isRemovingBackground || generating || preparing || uploaded;
+  const allViewsReady = viewCount === VIEWS.length;
+  const fieldsLocked = !allViewsReady || isRemovingBackground || generating || preparing || uploaded;
   const referenceLabel = references.length === 1 ? "1 image" : `${references.length} images`;
 
   if (!open) {
@@ -492,7 +491,7 @@ export function UploadAiDesignModal() {
                     }}
                   />
                   <span className="upload-ai-drop-title">Drop your idea here</span>
-                  <span className="upload-ai-drop-hint">One photo is enough. We'll turn it into front, back, left, and right.</span>
+                  <span className="upload-ai-drop-hint">One photo is enough. We'll turn it into a front and back view.</span>
                   <span className="upload-ai-drop-browse">Browse</span>
                 </label>
                 {references.length > 0 ? (
@@ -518,11 +517,11 @@ export function UploadAiDesignModal() {
                 <span>{references.length === 0 ? "" : referenceLabel}</span>
                 <span>JPG, PNG, or WEBP</span>
               </p>
-              {viewCount === 4 && !generating ? (
+              {allViewsReady && !generating ? (
                 <div className="upload-ai-3d-bar">
                   {showingModel ? (
                     <button type="button" className="upload-ai-3d" onClick={() => setShowingModel(false)}>
-                      Back to 4 views
+                      Back to the views
                     </button>
                   ) : (
                     <button type="button" className="upload-ai-3d" onClick={viewIn3d} disabled={makingModel || preparing}>
@@ -550,8 +549,8 @@ export function UploadAiDesignModal() {
                 </div>
                 )
               ) : null}
-              {limitNote && viewCount === 4 && !showingModel ? <p className="upload-ai-limit">{limitNote}</p> : null}
-              {viewCount === 4 && !showingModel ? (
+              {limitNote && allViewsReady && !showingModel ? <p className="upload-ai-limit">{limitNote}</p> : null}
+              {allViewsReady && !showingModel ? (
                 <div className="upload-ai-edit">
                   <label>
                     <span>Change the look</span>
@@ -608,9 +607,9 @@ export function UploadAiDesignModal() {
                   </select>
                 </label>
               </fieldset>
-              {viewCount < 4 && (generating || (hasReadyReference && !isRemovingBackground)) ? (
+              {!allViewsReady && (generating || (hasReadyReference && !isRemovingBackground)) ? (
                 <button type="button" className="upload-ai-generate" onClick={generateRest} disabled={generating || preparing || isRemovingBackground || !gender || !category}>
-                  {generating ? "Making the views" : "Make the four views"}
+                  {generating ? "Making the views" : "Make the front and back views"}
                 </button>
               ) : null}
               {fileError ? <p className="upload-ai-file-error">{fileError}</p> : null}

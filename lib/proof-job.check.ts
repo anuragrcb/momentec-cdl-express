@@ -83,7 +83,7 @@ const filteredPlan = filterPlanToAllowedCatalog(
       "Back Center (t7): 24 in SCARLET (#A31F2D)",
       "Left Sleeve Text (t55): TIGERS on sleeve",
     ],
-    viewPlan: { front: "front", back: "back", left: "left", right: "right" },
+    viewPlan: { front: "front", back: "back" },
   },
   { color_zones: [{ code: "SUB_FIRST_BODY_COLOR", name: "Body Color" }] },
 );

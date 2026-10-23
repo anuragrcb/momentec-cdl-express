@@ -9,15 +9,17 @@ import {
 } from "./catalog-match";
 import { generateGptImageSheet } from "./magnific";
 
-export type ArtworkView = "front" | "back" | "left" | "right";
+export type ArtworkView = "front" | "back";
 
-export const SHEET_VIEWS: ArtworkView[] = ["front", "back", "left", "right"];
+export const SHEET_VIEWS: ArtworkView[] = ["front", "back"];
+
+const SHEET_ASPECT_RATIO = "standard_3_2";
+
+export const EDIT_NEEDS_VIEWS = "Make the front and back views before applying an edit.";
 
 const ANGLE: Record<ArtworkView, string> = {
   front: "the FRONT of that one solid 3D garment, orthographic, straight on. The chest faces the camera. Sleeves have thickness and come slightly forward. The collar is an opening, not a flat ring",
   back: "the BACK of the same solid 3D garment, orthographic, turned 180 degrees. The back panel faces the camera. Sleeves keep the same thickness. The collar opening is still a hole",
-  left: "the LEFT side of the same solid 3D garment, a true 90 degree turn. This is the side on the viewer's left in the front view, and the front of the garment points toward the left edge of the cell. Show the depth of the torso and the sleeve as a form, not a paper-thin outline",
-  right: "the RIGHT side of the same solid 3D garment, a true 90 degree turn. This is the side on the viewer's right in the front view, and the front of the garment points toward the right edge of the cell. Show the depth of the torso and the sleeve as a form, not a paper-thin outline",
 };
 
 export interface DesignReference {
@@ -46,17 +48,15 @@ export function buildCatalogProjectionPrompt(match: CatalogMatchResult, referenc
       ? match.plan.textMapping.map((line) => `  - ${line}`).join("\n")
       : "  - Copy any text, wordmarks, names, or numbers shown in the customer's design at the same placement.";
 
-  return `Project the customer's custom garment design onto the exact 2x2 3D catalog garment template shown in Image 1.
+  return `Project the customer's custom garment design onto the exact side-by-side 3D catalog garment template shown in Image 1.
 
-- Image 1 is the manufacturer's 2x2 3D garment template for catalog style ${match.style} ("${match.winner.name}"). Its four cells show:
-  - Top-left cell: ${ANGLE.front}
-  - Top-right cell: ${ANGLE.back}
-  - Bottom-left cell: ${ANGLE.left}
-  - Bottom-right cell: ${ANGLE.right}
+- Image 1 is the manufacturer's side-by-side 3D garment template for catalog style ${match.style} ("${match.winner.name}"). Its two cells show:
+  - Left cell: ${ANGLE.front}
+  - Right cell: ${ANGLE.back}
 - ${designImages}
 
 Critical shape & construction rules (MUST follow Image 1):
-- Keep the EXACT 3D garment silhouette, collar/neckline cut, sleeve cut & length, button placket (if present in Image 1), hem shape, 3D volume, camera angles, scale, and 2x2 cell positions of Image 1.
+- Keep the EXACT 3D garment silhouette, collar/neckline cut, sleeve cut & length, button placket (if present in Image 1), hem shape, 3D volume, camera angles, scale, and left/right cell positions of Image 1.
 - Do NOT alter the garment cut to match Image 2 if Image 2 has a different collar, sleeve, or hem. Image 1 is the only manufacturable garment shape.
 
 Critical color rules (MUST follow the snapped Momentec catalog hex codes below):
@@ -76,19 +76,18 @@ ${logoLines}
 ${textLines}
 
 Per-view projection breakdown:
-- Top-left cell (FRONT view): ${match.plan.viewPlan.front}
-- Top-right cell (BACK view): ${match.plan.viewPlan.back}
-- Bottom-left cell (LEFT side view): ${match.plan.viewPlan.left}
-- Bottom-right cell (RIGHT side view): ${match.plan.viewPlan.right}
+- Left cell (FRONT view): ${match.plan.viewPlan.front}
+- Right cell (BACK view): ${match.plan.viewPlan.back}
 
 Hard layout rules:
+- Exactly two cells side by side: FRONT on the left, BACK on the right. Do not add side views or any other angle.
 - Each cell contains exactly one garment. Never draw two garments or two angles together in one cell.
-- Plain white background (#FFFFFF) in every cell. Keep the wide plain white cross through the exact center, horizontal and vertical, about one tenth of the sheet wide, cleanly separating the four cells. No garment may touch or cross that white cross. No shadow or backdrop.
+- Plain white background (#FFFFFF) in both cells. Keep the wide plain white vertical band through the exact center, about one fifteenth of the sheet wide, cleanly separating the two cells. No garment may touch or cross that white band. No shadow or backdrop.
 - Draw each garment at full length from top edge to bottom edge inside its cell, matching Image 1's scale and placement.
 - Do not draw any captions, labels, or view names. Only marks that belong on the garment fabric itself may appear.
 - The garment is empty: no person, mannequin, hanger, neck, skin, or arms.
 ${editLine(editNote)}
-Output only the completed 2x2 image.`;
+Output only the completed front and back image.`;
 }
 
 function editLine(note: string): string {
@@ -153,12 +152,9 @@ export async function splitSheet(buffer: Buffer): Promise<Record<ArtworkView, Bu
   const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width, height, channels } = info;
   const gapX = splitGap(contentFlags(data, width, height, channels, "column"), width);
-  const gapY = splitGap(contentFlags(data, width, height, channels, "row"), height);
   const boxes = {
-    front: { left: 0, top: 0, width: gapX.start, height: gapY.start },
-    back: { left: gapX.end, top: 0, width: width - gapX.end, height: gapY.start },
-    left: { left: 0, top: gapY.end, width: gapX.start, height: height - gapY.end },
-    right: { left: gapX.end, top: gapY.end, width: width - gapX.end, height: height - gapY.end },
+    front: { left: 0, top: 0, width: gapX.start, height },
+    back: { left: gapX.end, top: 0, width: width - gapX.end, height },
   };
 
   const entries = await Promise.all(
@@ -181,12 +177,16 @@ export async function generateMissingSheet(
   const match = trimmedInstruction
     ? options?.edit
     : await matchCatalogGarment(references[0].buffer, references[0].mimeType, options);
-  if (!match) throw new Error("Make the four views before applying an edit.");
+  if (!match) throw new Error(EDIT_NEEDS_VIEWS);
   const prompt = buildCatalogProjectionPrompt(match, references.length, trimmedInstruction);
-  const sheet = await generateGptImageSheet(prompt, [
-    { buffer: match.templateSheet, mimeType: "image/png" },
-    ...references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
-  ]);
+  const sheet = await generateGptImageSheet(
+    prompt,
+    [
+      { buffer: match.templateSheet, mimeType: "image/png" },
+      ...references.map((item) => ({ buffer: item.buffer, mimeType: item.mimeType })),
+    ],
+    { aspectRatio: SHEET_ASPECT_RATIO },
+  );
   return { sheet, views: await splitSheet(sheet), match };
 }
 
@@ -210,8 +210,6 @@ export function readEditMatch(raw: string, template: Buffer): CatalogMatchResult
     viewPlan: {
       front: typeof view.front === "string" ? view.front : "",
       back: typeof view.back === "string" ? view.back : "",
-      left: typeof view.left === "string" ? view.left : "",
-      right: typeof view.right === "string" ? view.right : "",
     },
   };
   const winner: MatchRow = {

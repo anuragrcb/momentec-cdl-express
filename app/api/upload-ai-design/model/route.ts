@@ -14,7 +14,7 @@ const MIME: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
-  if (!form) return NextResponse.json({ error: "Make the four views before opening the 3D view." }, { status: 400 });
+  if (!form) return NextResponse.json({ error: "Make the front and back views before opening the 3D view." }, { status: 400 });
 
   const sources: AssetSource[] = [];
   for (const view of SHEET_VIEWS) {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     sources.push({ view, buffer: Buffer.from(await value.arrayBuffer()), mimeType });
   }
   if (sources.length < SHEET_VIEWS.length) {
-    return NextResponse.json({ error: "Make the four views before opening the 3D view." }, { status: 400 });
+    return NextResponse.json({ error: "Make the front and back views before opening the 3D view." }, { status: 400 });
   }
 
   try {

@@ -8,15 +8,14 @@ import { completeJson, type JsonSchema } from "./openai-json";
 // WSL drops the catalog connection when Node's address attempt is only 250ms.
 setDefaultAutoSelectFamilyAttemptTimeout(10_000);
 
-const VIEWS = ["front", "back", "left", "right"] as const;
+const VIEWS = ["front", "back"] as const;
 
-// 960x1280 matches Magnific's traditional_3_4 aspect ratio, with a 1/10th white cross in the center.
-const SHEET_WIDTH = 960;
-const SHEET_HEIGHT = 1280;
+// 1440x960 matches Magnific's standard_3_2 aspect ratio: front on the left, back on the right, with a white band between.
+const SHEET_WIDTH = 1440;
+const SHEET_HEIGHT = 960;
 const GAP_X = 96;
-const GAP_Y = 128;
-const CELL_WIDTH = (SHEET_WIDTH - GAP_X) / 2; // 432
-const CELL_HEIGHT = (SHEET_HEIGHT - GAP_Y) / 2; // 576
+const CELL_WIDTH = (SHEET_WIDTH - GAP_X) / 2; // 672
+const CELL_HEIGHT = SHEET_HEIGHT;
 
 const ACCESSORY_RE = /\b(compression sleeve|cmprssion slv|headband|gaiter|mask|blanket|socks|namebar)\b/i;
 const BROKEN_PREVIEW_STYLE_RE = /^(UP\d|UFO|UPO|UPB|URS)/i;
@@ -52,18 +51,18 @@ Reply with ONLY valid JSON in this exact shape:
 logo_locations and text_locations must list only placements that are actually visible. Use an empty array when none are visible. confidence is 0 to 1.`;
 
 const JUDGE_AND_PLAN_PROMPT = `Image 1 is the customer's uploaded garment design.
-Each following image is a 2x2 3D render (Top-Left: Front, Top-Right: Back, Bottom-Left: Left side, Bottom-Right: Right side) of one candidate Momentec catalog style, accompanied by its catalog name, common logo placements, common text placements, and color zones.
+Each following image is a side-by-side 3D render (Left half: Front, Right half: Back) of one candidate Momentec catalog style, accompanied by its catalog name, common logo placements, common text placements, and color zones.
 
 This is a fully custom sublimated design, so a logo or text can be printed anywhere on the garment. The listed logo and text placements are only common reference spots. They are NOT limits.
 
 Your task has two parts:
 1. Pick the closest candidate catalog style that matches the physical garment silhouette and construction (neckline shape such as scoop vs crew vs V-neck, sleeve/strap cut, button placket if any, torso fit, and hem). Do NOT choose or reject a style because of its listed logo or text placements.
    If NONE of the candidate catalog styles match the physical construction of Image 1 (for example, Image 1 is a one-piece singlet/bodysuit/dress or a completely different garment cut than all candidates), set "supported": false and explain why in "unsupported_reason".
-2. For the winning catalog style, map the customer's uploaded design onto that catalog garment so an image generator can project the customer's texture and artwork onto all 4 views of the winning catalog style's 3D template:
+2. For the winning catalog style, map the customer's uploaded design onto that catalog garment so an image generator can project the customer's texture and artwork onto the front and back views of the winning catalog style's 3D template:
    - In "color_zone_mapping", assign ONLY the color zones that exist in the winning style's color_zones list (such as Body Color, Accent 1, Accent 2, Button Color, Collar/Trim) to the color, gradient, or sublimation pattern visible on the customer's garment (always include a 6-digit #RRGGBB hex code for every color). Omit any color panel that does not exist on the winning style.
-   - In "logo_mapping", include EVERY visible logo/crest/patch/graphic on the customer's garment. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's logo_locations when one fits that spot), what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view it sits on. A logo that has lettering inside it is one logo. Keep the words and the picture together. Do not file the words as text and the picture as a separate graphic. Keep each logo where the customer placed it. Do not invent logos.
-   - In "text_mapping", include EVERY visible wordmark/name/number that is separate from a logo. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's text_locations when one fits that spot), the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view it sits on. Do not repeat words that are already part of a logo. Keep each mark where the customer placed it. Do not invent text.
-   - In "view_plan", write concrete visual instructions for what must appear on the front, back, left, and right cells when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention every logo and text/number from "logo_mapping" and "text_mapping" on the view where it appears.
+   - In "logo_mapping", include EVERY visible logo/crest/patch/graphic on the customer's garment. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's logo_locations when one fits that spot), what the logo looks like with 6-digit #RRGGBB hex codes for its colors, and which view (front or back) it sits on. A logo that has lettering inside it is one logo. Keep the words and the picture together. Do not file the words as text and the picture as a separate graphic. Keep each logo where the customer placed it. Do not invent logos.
+   - In "text_mapping", include EVERY visible wordmark/name/number that is separate from a logo. For each one, describe where it sits on the garment in plain words (and add the matching location code and name from the winning style's text_locations when one fits that spot), the exact text/number, its fill/outline 6-digit #RRGGBB hex codes and font style, and which view (front or back) it sits on. Do not repeat words that are already part of a logo. Keep each mark where the customer placed it. Do not invent text.
+   - In "view_plan", write concrete visual instructions for what must appear on the front and back views when projecting the customer's design onto the winning catalog garment's 3D shape (include 6-digit #RRGGBB hex codes for every fabric zone, trim, logo, and text color mentioned). Mention every logo and text/number from "logo_mapping" and "text_mapping" on the view where it appears. A mark on a sleeve or side goes on whichever of front or back shows it best.
    - Color formatting rule: whenever you reference any color in "color_zone_mapping", "logo_mapping", "text_mapping", or "view_plan", always include its 6-digit "#RRGGBB" hex code (for example, "purple (#4B1D70)") so every color can be snapped to the manufacturer's official brand palette before rendering.
    - "not_possible" and "can_do" are shown to the customer. Write them in plain words a customer understands. "can_do" says what will be printed. A logo and the lettering inside it are one mark. Do not include style numbers or location codes such as m2 or t22. Leave "not_possible" empty unless a mark truly cannot be made (for example, it is unreadable). Never leave a mark off because of where it sits.
 
@@ -82,9 +81,7 @@ Reply with ONLY valid JSON in this exact shape:
   "can_do": ["..."],
   "view_plan": {
     "front": "...",
-    "back": "...",
-    "left": "...",
-    "right": "..."
+    "back": "..."
   }
 }
 winner_style must be one of the candidate style codes, or "none" when no candidate matches. confidence is 0 to 1. Use 0 when you are not sure.`;
@@ -124,8 +121,6 @@ export type GarmentProjectionPlan = {
   viewPlan: {
     front: string;
     back: string;
-    left: string;
-    right: string;
   };
 };
 
@@ -497,8 +492,6 @@ async function catalogSheet(template: string, style: string) {
     .composite([
       { input: cells[0], left: 0, top: 0 },
       { input: cells[1], left: CELL_WIDTH + GAP_X, top: 0 },
-      { input: cells[2], left: 0, top: CELL_HEIGHT + GAP_Y },
-      { input: cells[3], left: CELL_WIDTH + GAP_X, top: CELL_HEIGHT + GAP_Y },
     ])
     .png()
     .toBuffer();
@@ -537,7 +530,7 @@ async function chooseStyleAndPlan(
         .join(", ") || "none";
     return [
       {
-        text: `Candidate style ${row.style}: "${row.name}" (Brand: ${row.brand}, Sport: ${row.sport}, Segment: ${row.segment}). Common logo locations: ${logos}. Common text locations: ${texts}. Color zones: ${zones}. 2x2 views (front, back, left, right):`,
+        text: `Candidate style ${row.style}: "${row.name}" (Brand: ${row.brand}, Sport: ${row.sport}, Segment: ${row.segment}). Common logo locations: ${logos}. Common text locations: ${texts}. Color zones: ${zones}. Front (left half) and back (right half):`,
       },
       { data: sheet.toString("base64"), mimeType: "image/png" },
     ];
@@ -555,8 +548,6 @@ async function chooseStyleAndPlan(
     viewPlan: {
       front: "Apply the uploaded front body colors, sublimation pattern, and front chest logos/text onto the front view.",
       back: "Continue the uploaded body colors and sublimation pattern onto the back view; keep back clean unless back markings are shown.",
-      left: "Continue the uploaded body, side panel, and left sleeve colors/logos onto the left profile view.",
-      right: "Continue the uploaded body, side panel, and right sleeve colors/logos onto the right profile view.",
     },
   };
 
@@ -621,8 +612,6 @@ function readJudge(
       viewPlan: {
         front: typeof vp.front === "string" && vp.front.trim() ? vp.front.trim() : defaultPlan.viewPlan.front,
         back: typeof vp.back === "string" && vp.back.trim() ? vp.back.trim() : defaultPlan.viewPlan.back,
-        left: typeof vp.left === "string" && vp.left.trim() ? vp.left.trim() : defaultPlan.viewPlan.left,
-        right: typeof vp.right === "string" && vp.right.trim() ? vp.right.trim() : defaultPlan.viewPlan.right,
       },
     },
   };
@@ -683,10 +672,8 @@ function judgeSchema(styleCodes: string[]): JsonSchema {
         properties: {
           front: { type: "string" },
           back: { type: "string" },
-          left: { type: "string" },
-          right: { type: "string" },
         },
-        required: ["front", "back", "left", "right"],
+        required: ["front", "back"],
       },
     },
     required: [

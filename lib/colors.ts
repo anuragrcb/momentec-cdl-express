@@ -244,7 +244,7 @@ export async function snapPlanColors<
     colorZoneMapping: string[];
     logoMapping: string[];
     textMapping: string[];
-    viewPlan: { front: string; back: string; left: string; right: string };
+    viewPlan: { front: string; back: string };
   },
 >(plan: T, brand?: string): Promise<T> {
   const allStrings = [
@@ -253,8 +253,6 @@ export async function snapPlanColors<
     ...plan.textMapping,
     plan.viewPlan.front,
     plan.viewPlan.back,
-    plan.viewPlan.left,
-    plan.viewPlan.right,
   ];
   const uniqueHexes = new Set<string>();
   for (const str of allStrings) {
@@ -280,8 +278,6 @@ export async function snapPlanColors<
     viewPlan: {
       front: replaceSnappedColors(plan.viewPlan.front, hexMap),
       back: replaceSnappedColors(plan.viewPlan.back, hexMap),
-      left: replaceSnappedColors(plan.viewPlan.left, hexMap),
-      right: replaceSnappedColors(plan.viewPlan.right, hexMap),
     },
   };
 }
@@ -291,7 +287,7 @@ export function filterPlanToAllowedCatalog<
     colorZoneMapping: string[];
     logoMapping: string[];
     textMapping: string[];
-    viewPlan: { front: string; back: string; left: string; right: string };
+    viewPlan: { front: string; back: string };
   },
 >(
   plan: T,

@@ -30,8 +30,6 @@ export type ProofCatalogPlan = {
   viewPlan?: {
     front?: string;
     back?: string;
-    left?: string;
-    right?: string;
   };
 };
 
@@ -186,8 +184,6 @@ function readPlanObject(r: Record<string, unknown>): ProofCatalogPlan {
           viewPlan: {
             front: typeof vp.front === "string" ? vp.front.slice(0, 600) : undefined,
             back: typeof vp.back === "string" ? vp.back.slice(0, 600) : undefined,
-            left: typeof vp.left === "string" ? vp.left.slice(0, 600) : undefined,
-            right: typeof vp.right === "string" ? vp.right.slice(0, 600) : undefined,
           },
         }
       : {}),
