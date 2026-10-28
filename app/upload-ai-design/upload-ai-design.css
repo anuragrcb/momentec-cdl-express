@@ -597,6 +597,76 @@
   font-size: 18px;
 }
 
+.upload-ai-tracking {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #f7f8fa;
+  font: 400 12px/1.4 var(--font);
+  color: #3a3a3a;
+}
+
+.upload-ai-tracking > span {
+  font: 800 11px/1 var(--font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.upload-ai-tracking code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+  font-size: 12px;
+}
+
+.upload-ai-tracking button {
+  border: 1px solid #1e4f9a;
+  border-radius: 4px;
+  background: #fff;
+  color: #1e4f9a;
+  font: 700 11px/1 var(--font-display);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.upload-ai-tracking small {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: #6a6a6a;
+}
+
+.upload-ai-tracking a {
+  color: #1e4f9a;
+}
+
+.upload-ai-tracking .upload-ai-again {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #1e4f9a;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.upload-ai-jobs-link {
+  display: inline-block;
+  margin-top: 6px;
+  font: 700 11px/1 var(--font-display);
+  letter-spacing: 0.04em;
+  color: #1e4f9a;
+  text-decoration: none;
+}
+
+.upload-ai-jobs-link:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 480px) {
   .upload-ai-backdrop {
     padding: 10px 12px;

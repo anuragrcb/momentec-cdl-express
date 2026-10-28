@@ -1,0 +1,140 @@
+MOMENTEC PROOF API
+==================
+
+Base URL : https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws
+Header   : x-api-key: mhuiyt   (required on every request)
+
+
+----------------------------------------------------------------------
+1. CREATE JOB
+----------------------------------------------------------------------
+
+POST https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws/jobs
+
+Headers
+  x-api-key: mhuiyt
+  Content-Type: application/json
+
+Body
+{
+  "name": "Jane Coach",
+  "email": "jane@example.com",
+  "message": "Please make the chest logo a little bigger.",
+  "size": "M",
+  "quality": "high",
+  "images": [
+    "https://cdn.example.com/designs/front.jpg",
+    { "url": "https://cdn.example.com/designs/back.png" },
+    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ...",
+    { "data": "iVBORw0KGgoAAAANSUhEUgAA..." }
+  ]
+}
+
+Fields
+  name      required   Up to 120 characters.
+  email     required   A valid email address.
+  message   optional   Up to 2000 characters. Shown to the artist on the proof.
+  size      optional   XS, S, M, L, XL, 2XL, 3XL. Default: L.
+  quality   optional   high (default), medium, or low (faster and cheaper, for drafts).
+  images    required   1 to 8 images (PNG, JPEG, or WEBP). Each one is either:
+                         - an https link: "https://..." or { "url": "https://..." }
+                         - base64: plain, "data:image/...;base64,...", or { "data": "..." }
+                       Links and base64 can be mixed. Put the front of the garment first.
+
+Limits
+  - Base64 images together: max 4 MB.
+  - Each linked image: max 10 MB, must download within 15 seconds.
+  - All images together: max 40 MB.
+
+Response  202 Accepted
+{
+  "jobId": "job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33",
+  "state": "queued",
+  "quality": "high",
+  "statusUrl": "/jobs/job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33"
+}
+
+Keep the jobId. You need it to check the status.
+
+
+----------------------------------------------------------------------
+2. GET JOB STATUS
+----------------------------------------------------------------------
+
+GET https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws/jobs/{jobId}
+
+Headers
+  x-api-key: mhuiyt
+
+Example
+  GET https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws/jobs/job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33
+
+Response  200 OK  (while running)
+{
+  "jobId": "job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33",
+  "state": "running",
+  "message": "Step 4 of 6: Creating the front and back views. This usually takes a few minutes.",
+  "progress": 42,
+  "step": { "key": "generating_views", "label": "Creating the front and back views", "number": 4, "total": 6 },
+  "steps": [
+    { "key": "reading_images",      "label": "Reading your images",                 "status": "done" },
+    { "key": "identifying_garment", "label": "Identifying the garment",             "status": "done" },
+    { "key": "matching_style",      "label": "Finding the closest Momentec style",  "status": "done" },
+    { "key": "generating_views",    "label": "Creating the front and back views",   "status": "in_progress" },
+    { "key": "extracting_marks",    "label": "Preparing logos, names, and numbers", "status": "waiting" },
+    { "key": "building_pdf",        "label": "Building the proof PDF",              "status": "waiting" }
+  ],
+  "garment": { "style": "228103", "name": "Sublimated V-Neck Hockey Jersey", "category": "Hockey", "gender": "Men", "size": "L" },
+  "quality": "high",
+  "pdf": null,
+  "reason": null,
+  "error": null,
+  "submittedAt": "2026-10-23T15:10:28.000Z",
+  "updatedAt": "2026-10-23T15:11:40.000Z"
+}
+
+When finished, "state" is "done" and "pdf" has a download link (valid 15 minutes;
+call GET again for a fresh one):
+
+  "pdf": { "url": "https://...proof.pdf?X-Amz-...", "expiresAt": "2026-10-23T15:28:14.775Z" }
+
+States
+  queued         Saved, about to start.
+  running        In progress. See message, step, and progress (0 to 99).
+  done           The proof PDF is ready (progress 100).
+  needs_review   Could not be finished automatically. A PDF is still ready with the
+                 uploaded images and the reason, for an artist to finish by hand.
+  failed         Something went wrong before a PDF could be made. See error.
+
+Check every 10 to 15 seconds. A job usually takes a few minutes.
+
+
+----------------------------------------------------------------------
+3. LIST JOBS
+----------------------------------------------------------------------
+GET https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws/jobs?limit=10
+
+All jobs, newest first. limit is 1 to 50 (default 10). Each item in "data" has
+the same fields as GET JOB STATUS, plus "customerName".
+Next page: add &after=<last_id> while "has_more" is true.
+
+Response  200 OK
+  {
+    "object": "list",
+    "data": [ { "jobId": "job-...", "state": "done", "progress": 100, "pdf": { "url": "..." }, ... } ],
+    "first_id": "job-...",
+    "last_id": "job-...",
+    "has_more": true
+  }
+
+
+----------------------------------------------------------------------
+ERRORS
+----------------------------------------------------------------------
+
+All errors are JSON:  { "error": "..." }
+
+  400  Invalid body (the message names the field) or malformed job id.
+  401  x-api-key missing or wrong.
+  404  No job with that id.
+  502  Job saved but not started; try again (reply includes jobId).

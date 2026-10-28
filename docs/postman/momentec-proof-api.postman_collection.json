@@ -1,0 +1,835 @@
+{
+    "info": {
+        "_postman_id": "6c1f3a52-8d4e-4b7a-9c21-5e0f7d3b9a14",
+        "name": "Momentec Proof API",
+        "description": "Create custom design proofs and track them.\n\n**Setup (once):** open this collection → **Variables** tab → set `baseUrl` to the Lambda Function URL (no trailing slash) and `apiKey` to the `PROOF_API_KEY` value. Save.\n\nEvery request sends the key as the `x-api-key` header automatically (collection **Authorization** tab).\n\n**Typical flow:**\n1. Send one of the **Create job** requests. The `jobId` is saved for you.\n2. Send **Get job status** every 10–15 seconds. Open the response **Visualize** tab for a progress view.\n3. When `state` is `done` or `needs_review`, send **Download PDF** (or open `pdf.url`).\n\nOr open the **Run: create and wait** folder and click **Run** to do all three automatically.\n\nFull reference: `docs/proof-api.md`.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "auth": {
+        "type": "apikey",
+        "apikey": [
+            {
+                "key": "key",
+                "value": "x-api-key",
+                "type": "string"
+            },
+            {
+                "key": "value",
+                "value": "{{apiKey}}",
+                "type": "string"
+            },
+            {
+                "key": "in",
+                "value": "header",
+                "type": "string"
+            }
+        ]
+    },
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "https://vtileokggwrv5n7hvxbm63ulem0cmlrl.lambda-url.ap-southeast-2.on.aws",
+            "type": "string"
+        },
+        {
+            "key": "apiKey",
+            "value": "715768cc0e52ba578bd6fd3b50cc2e451c221b723ce64f734c9cd3703378457e",
+            "type": "string"
+        },
+        {
+            "key": "jobId",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "pdfUrl",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "pollCount",
+            "value": "0",
+            "type": "string"
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    "// Catch the two setup mistakes before anything is sent.",
+                    "const base = pm.collectionVariables.get(\u0027baseUrl\u0027) || \u0027\u0027;",
+                    "const key = pm.collectionVariables.get(\u0027apiKey\u0027) || \u0027\u0027;",
+                    "if (base.includes(\u0027YOUR-FUNCTION-URL\u0027)) { throw new Error(\u0027Set the collection variable baseUrl to your Lambda Function URL first.\u0027); }",
+                    "if (base.endsWith(\u0027/\u0027)) { pm.collectionVariables.set(\u0027baseUrl\u0027, base.replace(/\\/+$/, \u0027\u0027)); }",
+                    "// Requests that inherit the collection auth have no auth of their own; only noauth ones skip the key.",
+                    "const usesKey = !(pm.request.auth \u0026\u0026 pm.request.auth.type === \u0027noauth\u0027);",
+                    "if (usesKey \u0026\u0026 key.startsWith(\u0027PASTE_\u0027)) { throw new Error(\u0027Set the collection variable apiKey to your PROOF_API_KEY first.\u0027); }"
+                ]
+            }
+        }
+    ],
+    "item": [
+        {
+            "name": "Create job",
+            "description": "Start a new proof. Each request saves the returned `jobId` into the collection variable so **Get job status** works right after.\n\n`images`: 1–8 items, each an https link (string or `{ \"url\": ... }`) or base64 (plain, `data:` URI, or `{ \"data\": ... }`). Base64 images together ≤ 4 MB; each linked image ≤ 10 MB.\n\n`size`: XS, S, M, L, XL, 2XL, 3XL (default L). `quality`: high (default), medium, low.",
+            "item": [
+                {
+                    "name": "Create job – image link",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Job accepted (202)\u0027, () =\u003e pm.response.to.have.status(202));",
+                                    "const body = pm.response.json();",
+                                    "if (body.jobId) {",
+                                    "  pm.collectionVariables.set(\u0027jobId\u0027, body.jobId);",
+                                    "  pm.collectionVariables.set(\u0027pdfUrl\u0027, \u0027\u0027);",
+                                    "  console.log(\u0027Saved jobId\u0027, body.jobId);",
+                                    "} else {",
+                                    "  console.log(\u0027Not created:\u0027, body.error);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"message\": \"Please make the chest logo a little bigger.\",\n  \"size\": \"M\",\n  \"quality\": \"high\",\n  \"images\": [\n    \"https://example.com/replace-with-your-garment-front.jpg\"\n  ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ]
+                        },
+                        "description": "Replace the image link with a real, publicly downloadable https image of the garment (front first). You can add a back view or logo close-ups as more items."
+                    },
+                    "response": [
+                        {
+                            "name": "202 Accepted",
+                            "originalRequest": {
+                                "method": "POST",
+                                "header": [
+                                    {
+                                        "key": "Content-Type",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"images\": [\"https://cdn.example.com/front.jpg\"]\n}"
+                                },
+                                "url": {
+                                    "raw": "{{baseUrl}}/jobs",
+                                    "host": [
+                                        "{{baseUrl}}"
+                                    ],
+                                    "path": [
+                                        "jobs"
+                                    ]
+                                }
+                            },
+                            "status": "Accepted",
+                            "code": 202,
+                            "_postman_previewlanguage": "json",
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"jobId\": \"job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33\",\n  \"state\": \"queued\",\n  \"quality\": \"high\",\n  \"statusUrl\": \"/jobs/job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33\"\n}"
+                        },
+                        {
+                            "name": "400 Link could not be downloaded",
+                            "originalRequest": {
+                                "method": "POST",
+                                "header": [
+                                    {
+                                        "key": "Content-Type",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "body": {
+                                    "mode": "raw",
+                                    "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"images\": [\"https://cdn.example.com/missing.jpg\"]\n}"
+                                },
+                                "url": {
+                                    "raw": "{{baseUrl}}/jobs",
+                                    "host": [
+                                        "{{baseUrl}}"
+                                    ],
+                                    "path": [
+                                        "jobs"
+                                    ]
+                                }
+                            },
+                            "status": "Bad Request",
+                            "code": 400,
+                            "_postman_previewlanguage": "json",
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"error\": \"images[0] (https://cdn.example.com/missing.jpg) returned HTTP 404.\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create job – base64 image",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Job accepted (202)\u0027, () =\u003e pm.response.to.have.status(202));",
+                                    "const body = pm.response.json();",
+                                    "if (body.jobId) {",
+                                    "  pm.collectionVariables.set(\u0027jobId\u0027, body.jobId);",
+                                    "  pm.collectionVariables.set(\u0027pdfUrl\u0027, \u0027\u0027);",
+                                    "  console.log(\u0027Saved jobId\u0027, body.jobId);",
+                                    "} else {",
+                                    "  console.log(\u0027Not created:\u0027, body.error);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"size\": \"L\",\n  \"images\": [\n    \"PASTE_BASE64_IMAGE_HERE\"\n  ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ]
+                        },
+                        "description": "Replace `PASTE_BASE64_IMAGE_HERE` with the base64 of a PNG, JPEG, or WEBP (plain base64 or a `data:image/...;base64,...` string both work). Keep all base64 images together under 4 MB; a JPEG around 1600 px is plenty."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create job – mixed images, quick draft",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Job accepted (202)\u0027, () =\u003e pm.response.to.have.status(202));",
+                                    "const body = pm.response.json();",
+                                    "if (body.jobId) {",
+                                    "  pm.collectionVariables.set(\u0027jobId\u0027, body.jobId);",
+                                    "  pm.collectionVariables.set(\u0027pdfUrl\u0027, \u0027\u0027);",
+                                    "  console.log(\u0027Saved jobId\u0027, body.jobId);",
+                                    "} else {",
+                                    "  console.log(\u0027Not created:\u0027, body.error);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"message\": \"Draft only.\",\n  \"quality\": \"low\",\n  \"images\": [\n    { \"url\": \"https://example.com/replace-with-your-garment-front.jpg\" },\n    { \"url\": \"https://example.com/replace-with-your-garment-back.jpg\" },\n    { \"data\": \"PASTE_BASE64_LOGO_CLOSEUP_HERE\" }\n  ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ]
+                        },
+                        "description": "Links and base64 can be mixed in one request. `quality: low` renders faster and cheaper; use it for drafts. Remove items you don\u0027t have."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Get job status",
+            "event": [
+                {
+                    "listen": "prerequest",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "if (!pm.collectionVariables.get(\u0027jobId\u0027)) { throw new Error(\u0027No jobId yet. Send a Create job request first, or set the jobId collection variable.\u0027); }"
+                        ]
+                    }
+                },
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test(\u0027Status returned (200)\u0027, () =\u003e pm.response.to.have.status(200));",
+                            "const body = pm.response.json();",
+                            "if (pm.response.code !== 200) { console.log(body.error); return; }",
+                            "console.log(`${body.state} · ${body.progress}% · ${body.message}`);",
+                            "if (body.pdf \u0026\u0026 body.pdf.url) { pm.collectionVariables.set(\u0027pdfUrl\u0027, body.pdf.url); }",
+                            "",
+                            "// Response → Visualize tab: a readable progress view.",
+                            "const template = `",
+                            "\u003cstyle\u003e",
+                            "  body { font-family: -apple-system, \u0027Segoe UI\u0027, Helvetica, Arial, sans-serif; color: #231f20; margin: 0; padding: 16px; }",
+                            "  .card { max-width: 560px; border: 1px solid #e2e5ea; border-radius: 10px; padding: 20px 22px; }",
+                            "  h2 { margin: 0 0 4px; font-size: 20px; }",
+                            "  .id { font: 12px monospace; color: #5c6770; word-break: break-all; }",
+                            "  .badge { display: inline-block; margin-top: 14px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }",
+                            "  .queued { background: #eef0f3; color: #5c6770; } .running { background: #e6eefa; color: #1e4f9a; }",
+                            "  .done { background: #e3f6ea; color: #17803d; } .needs_review { background: #fff3dc; color: #a35d00; } .failed { background: #fde7e7; color: #b42318; }",
+                            "  .msg { margin: 10px 0 0; font-size: 14px; line-height: 1.5; }",
+                            "  .bar { height: 10px; margin-top: 14px; background: #eef0f3; border-radius: 999px; overflow: hidden; }",
+                            "  .fill { height: 100%; background: #1e4f9a; border-radius: 999px; }",
+                            "  .fill.done { background: #22a352; } .fill.needs_review { background: #e39b1b; } .fill.failed { background: #d64545; }",
+                            "  .pct { text-align: right; font-size: 12px; color: #5c6770; margin-top: 4px; }",
+                            "  ul { list-style: none; padding: 0; margin: 14px 0 0; border-top: 1px solid #eef0f3; }",
+                            "  li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eef0f3; font-size: 14px; color: #9aa3ad; }",
+                            "  li.done { color: #231f20; } li.in_progress { color: #1e4f9a; font-weight: 600; } li.stopped { color: #a35d00; font-weight: 600; }",
+                            "  .note { margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: #fff8eb; border: 1px solid #f3d9a6; font-size: 13px; }",
+                            "  .err { background: #fff1f1; border-color: #f2c4c4; }",
+                            "  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0 0; padding: 12px; background: #f7f8fa; border-radius: 6px; }",
+                            "  dt { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #5c6770; } dd { margin: 4px 0 0; font-size: 14px; font-weight: 600; }",
+                            "  a.btn { display: block; margin-top: 16px; padding: 12px; text-align: center; background: #1e4f9a; color: #fff; border-radius: 6px; font-weight: 800; text-decoration: none; }",
+                            "  .times { margin-top: 12px; font-size: 12px; color: #8a939c; }",
+                            "\u003c/style\u003e",
+                            "\u003cdiv class=\u0027card\u0027\u003e",
+                            "  \u003ch2\u003eCustom design proof\u003c/h2\u003e",
+                            "  \u003cdiv class=\u0027id\u0027\u003e{{jobId}}\u003c/div\u003e",
+                            "  \u003cspan class=\u0027badge {{state}}\u0027\u003e{{stateLabel}}\u003c/span\u003e",
+                            "  \u003cp class=\u0027msg\u0027\u003e{{message}}\u003c/p\u003e",
+                            "  \u003cdiv class=\u0027bar\u0027\u003e\u003cdiv class=\u0027fill {{state}}\u0027 style=\u0027width: {{barWidth}}%\u0027\u003e\u003c/div\u003e\u003c/div\u003e",
+                            "  \u003cdiv class=\u0027pct\u0027\u003e{{progress}}%\u003c/div\u003e",
+                            "  {{#if pdf}}\u003ca class=\u0027btn\u0027 href=\u0027{{pdf.url}}\u0027 target=\u0027_blank\u0027\u003eDownload PDF (link valid 15 min)\u003c/a\u003e{{/if}}",
+                            "  {{#if reason}}\u003cdiv class=\u0027note\u0027\u003e\u003cb\u003eWhy it needs an artist:\u003c/b\u003e {{reason}}\u003c/div\u003e{{/if}}",
+                            "  {{#if error}}\u003cdiv class=\u0027note err\u0027\u003e\u003cb\u003eWhat went wrong:\u003c/b\u003e {{error}}\u003c/div\u003e{{/if}}",
+                            "  \u003cul\u003e{{#each steps}}\u003cli class=\u0027{{status}}\u0027\u003e\u003cspan\u003e{{label}}\u003c/span\u003e\u003cspan\u003e{{statusLabel}}\u003c/span\u003e\u003c/li\u003e{{/each}}\u003c/ul\u003e",
+                            "  {{#if garmentRows.length}}\u003cdl\u003e{{#each garmentRows}}\u003cdiv\u003e\u003cdt\u003e{{label}}\u003c/dt\u003e\u003cdd\u003e{{value}}\u003c/dd\u003e\u003c/div\u003e{{/each}}\u003c/dl\u003e{{/if}}",
+                            "  \u003cdiv class=\u0027times\u0027\u003eQuality: {{quality}}{{#if submittedAt}} · Submitted {{submittedAt}}{{/if}}{{#if updatedAt}} · Updated {{updatedAt}}{{/if}}\u003c/div\u003e",
+                            "\u003c/div\u003e`;",
+                            "",
+                            "const stateLabels = { queued: \u0027Queued\u0027, running: \u0027In progress\u0027, done: \u0027Ready\u0027, needs_review: \u0027Artist review\u0027, failed: \u0027Not completed\u0027 };",
+                            "const stepLabels = { done: \u0027Done\u0027, in_progress: \u0027Working…\u0027, waiting: \u0027\u0027, stopped: \u0027Stopped here\u0027, skipped: \u0027Skipped\u0027 };",
+                            "const g = body.garment || {};",
+                            "const garmentRows = [[\u0027Garment\u0027, g.name], [\u0027Style #\u0027, g.style], [\u0027Category\u0027, g.category], [\u0027Fit\u0027, g.gender], [\u0027Size\u0027, g.size]]",
+                            "  .filter((row) =\u003e row[1]).map(([label, value]) =\u003e ({ label, value }));",
+                            "const when = (iso) =\u003e iso ? new Date(iso).toLocaleString() : null;",
+                            "pm.visualizer.set(template, {",
+                            "  ...body,",
+                            "  stateLabel: stateLabels[body.state] || body.state,",
+                            "  barWidth: Math.max(body.progress || 0, 3),",
+                            "  steps: (body.steps || []).map((s) =\u003e ({ ...s, statusLabel: stepLabels[s.status] || \u0027\u0027 })),",
+                            "  garmentRows,",
+                            "  submittedAt: when(body.submittedAt),",
+                            "  updatedAt: when(body.updatedAt)",
+                            "});"
+                        ]
+                    }
+                }
+            ],
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/jobs/{{jobId}}",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "jobs",
+                        "{{jobId}}"
+                    ]
+                },
+                "description": "Uses the `jobId` saved by the last **Create job** request. Send it every 10–15 seconds. Open the response **Visualize** tab for a progress view. When the PDF is ready its link is saved into `pdfUrl`."
+            },
+            "response": [
+                {
+                    "name": "200 Running",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "{{jobId}}"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "body": "{\n  \"jobId\": \"job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33\",\n  \"state\": \"running\",\n  \"message\": \"Step 4 of 6: Creating the front and back views. This usually takes a few minutes.\",\n  \"progress\": 42,\n  \"step\": { \"key\": \"generating_views\", \"label\": \"Creating the front and back views\", \"number\": 4, \"total\": 6 },\n  \"steps\": [\n    { \"key\": \"reading_images\", \"label\": \"Reading your images\", \"status\": \"done\" },\n    { \"key\": \"identifying_garment\", \"label\": \"Identifying the garment\", \"status\": \"done\" },\n    { \"key\": \"matching_style\", \"label\": \"Finding the closest Momentec style\", \"status\": \"done\" },\n    { \"key\": \"generating_views\", \"label\": \"Creating the front and back views\", \"status\": \"in_progress\" },\n    { \"key\": \"extracting_marks\", \"label\": \"Preparing logos, names, and numbers\", \"status\": \"waiting\" },\n    { \"key\": \"building_pdf\", \"label\": \"Building the proof PDF\", \"status\": \"waiting\" }\n  ],\n  \"garment\": { \"style\": \"228103\", \"name\": \"Sublimated V-Neck Hockey Jersey\", \"category\": \"Hockey\", \"gender\": \"Men\", \"size\": \"L\" },\n  \"quality\": \"high\",\n  \"pdf\": null,\n  \"reason\": null,\n  \"error\": null,\n  \"submittedAt\": \"2026-10-23T15:10:28.000Z\",\n  \"updatedAt\": \"2026-10-23T15:11:40.000Z\"\n}"
+                },
+                {
+                    "name": "200 Done",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "{{jobId}}"
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "body": "{\n  \"jobId\": \"job-2026-10-23T15-10-28Z_4f4150bb-7d8c-4321-bd41-cc8a53bf0d33\",\n  \"state\": \"done\",\n  \"message\": \"The proof is ready to download.\",\n  \"progress\": 100,\n  \"step\": null,\n  \"steps\": [\n    { \"key\": \"reading_images\", \"label\": \"Reading your images\", \"status\": \"done\" },\n    { \"key\": \"identifying_garment\", \"label\": \"Identifying the garment\", \"status\": \"done\" },\n    { \"key\": \"matching_style\", \"label\": \"Finding the closest Momentec style\", \"status\": \"done\" },\n    { \"key\": \"generating_views\", \"label\": \"Creating the front and back views\", \"status\": \"done\" },\n    { \"key\": \"extracting_marks\", \"label\": \"Preparing logos, names, and numbers\", \"status\": \"done\" },\n    { \"key\": \"building_pdf\", \"label\": \"Building the proof PDF\", \"status\": \"done\" }\n  ],\n  \"garment\": { \"style\": \"228103\", \"name\": \"Sublimated V-Neck Hockey Jersey\", \"category\": \"Hockey\", \"gender\": \"Men\", \"size\": \"L\" },\n  \"quality\": \"high\",\n  \"pdf\": { \"url\": \"https://momentec-cdl-proofs-946033679274.s3.ap-southeast-2.amazonaws.com/job-.../proof.pdf?X-Amz-...\", \"expiresAt\": \"2026-10-23T15:28:14.775Z\" },\n  \"reason\": null,\n  \"error\": null,\n  \"submittedAt\": \"2026-10-23T15:10:28.000Z\",\n  \"updatedAt\": \"2026-10-23T15:13:04.417Z\"\n}"
+                },
+                {
+                    "name": "404 Unknown job",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "{{jobId}}"
+                            ]
+                        }
+                    },
+                    "status": "Not Found",
+                    "code": 404,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "body": "{\n  \"error\": \"No job with that id.\"\n}"
+                }
+            ]
+        },
+        {
+            "name": "List jobs",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{baseUrl}}/jobs?limit=10",
+                    "host": [
+                        "{{baseUrl}}"
+                    ],
+                    "path": [
+                        "jobs"
+                    ],
+                    "query": [
+                        {
+                            "key": "limit",
+                            "value": "10",
+                            "description": "1 to 50, default 10."
+                        },
+                        {
+                            "key": "after",
+                            "value": "",
+                            "description": "For the next page: the last_id from the previous reply.",
+                            "disabled": true
+                        }
+                    ]
+                },
+                "description": "All jobs, newest first. Each item in `data` has the same fields as **Get job status**. When `has_more` is true, send again with `after` set to `last_id`."
+            },
+            "response": [
+                {
+                    "name": "200 List",
+                    "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs?limit=2",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ],
+                            "query": [
+                                {
+                                    "key": "limit",
+                                    "value": "2"
+                                }
+                            ]
+                        }
+                    },
+                    "status": "OK",
+                    "code": 200,
+                    "_postman_previewlanguage": "json",
+                    "header": [
+                        {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ],
+                    "body": "{\n  \"object\": \"list\",\n  \"data\": [\n    {\n      \"jobId\": \"job-2026-10-28T10-42-11.000Z_5f0c...\",\n      \"state\": \"running\",\n      \"message\": \"Step 4 of 6: Creating the front and back views. This usually takes a few minutes.\",\n      \"progress\": 35,\n      \"customerName\": \"Jane Coach\",\n      \"quality\": \"high\",\n      \"garment\": { \"style\": \"R45VTM\", \"name\": \"Sublimated V-Neck Hockey Jersey\", \"category\": \"Hockey\", \"gender\": \"Men\", \"size\": \"M\" },\n      \"pdf\": null,\n      \"submittedAt\": \"2026-10-28T10:42:11.000Z\"\n    },\n    {\n      \"jobId\": \"job-2026-10-28T09-15-02.000Z_91ab...\",\n      \"state\": \"done\",\n      \"message\": \"The proof is ready to download.\",\n      \"progress\": 100,\n      \"customerName\": \"Sam Lee\",\n      \"quality\": \"medium\",\n      \"pdf\": { \"url\": \"https://momentec-cdl-proofs-...s3.amazonaws.com/...proof.pdf?X-Amz-...\", \"expiresAt\": \"2026-10-28T10:57:11.000Z\" },\n      \"submittedAt\": \"2026-10-28T09:15:02.000Z\"\n    }\n  ],\n  \"first_id\": \"job-2026-10-28T10-42-11.000Z_5f0c...\",\n  \"last_id\": \"job-2026-10-28T09-15-02.000Z_91ab...\",\n  \"has_more\": true\n}"
+                }
+            ]
+        },
+        {
+            "name": "Download PDF",
+            "event": [
+                {
+                    "listen": "prerequest",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "if (!pm.collectionVariables.get(\u0027pdfUrl\u0027)) { throw new Error(\u0027No PDF link yet. Send Get job status until state is done or needs_review.\u0027); }"
+                        ]
+                    }
+                },
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test(\u0027PDF downloaded\u0027, () =\u003e {",
+                            "  pm.response.to.have.status(200);",
+                            "  pm.expect(pm.response.headers.get(\u0027Content-Type\u0027)).to.include(\u0027pdf\u0027);",
+                            "});",
+                            "if (pm.response.code === 403) { console.log(\u0027The link expired (15 minutes). Send Get job status again for a fresh one.\u0027); }"
+                        ]
+                    }
+                }
+            ],
+            "request": {
+                "auth": {
+                    "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{pdfUrl}}",
+                    "host": [
+                        "{{pdfUrl}}"
+                    ]
+                },
+                "description": "Downloads the PDF from the signed link saved by **Get job status**. Use **Send and Download** to save it as a file. The link works for 15 minutes; a 403 means it expired, so send **Get job status** again."
+            },
+            "response": []
+        },
+        {
+            "name": "Run: create and wait",
+            "description": "Select this folder and click **Run**. It creates a job from an image link, then checks the status every 15 seconds until the proof is finished (up to about 15 minutes), then downloads the PDF.\n\nEdit the image link in **1. Create job** first.",
+            "item": [
+                {
+                    "name": "1. Create job",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Job accepted (202)\u0027, () =\u003e pm.response.to.have.status(202));",
+                                    "const next = (name) =\u003e (pm.execution \u0026\u0026 pm.execution.setNextRequest ? pm.execution.setNextRequest(name) : postman.setNextRequest(name));",
+                                    "const body = pm.response.json();",
+                                    "if (!body.jobId) { console.log(\u0027Not created:\u0027, body.error); next(null); return; }",
+                                    "pm.collectionVariables.set(\u0027jobId\u0027, body.jobId);",
+                                    "pm.collectionVariables.set(\u0027pdfUrl\u0027, \u0027\u0027);",
+                                    "pm.collectionVariables.set(\u0027pollCount\u0027, \u00270\u0027);",
+                                    "console.log(\u0027Created\u0027, body.jobId);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"jane@example.com\",\n  \"size\": \"M\",\n  \"images\": [\n    \"https://example.com/replace-with-your-garment-front.jpg\"\n  ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2. Wait until finished",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "const next = (name) =\u003e (pm.execution \u0026\u0026 pm.execution.setNextRequest ? pm.execution.setNextRequest(name) : postman.setNextRequest(name));",
+                                    "const body = pm.response.json();",
+                                    "if (pm.response.code !== 200) { console.log(\u0027Status check failed:\u0027, body.error); next(null); return; }",
+                                    "const count = Number(pm.collectionVariables.get(\u0027pollCount\u0027) || 0) + 1;",
+                                    "pm.collectionVariables.set(\u0027pollCount\u0027, String(count));",
+                                    "console.log(`Check ${count}: ${body.state} · ${body.progress}% · ${body.message}`);",
+                                    "const finished = [\u0027done\u0027, \u0027needs_review\u0027, \u0027failed\u0027].includes(body.state);",
+                                    "if (finished) {",
+                                    "  pm.test(`Finished: ${body.state}`, () =\u003e pm.expect(body.state).to.not.equal(\u0027failed\u0027));",
+                                    "  if (body.pdf \u0026\u0026 body.pdf.url) { pm.collectionVariables.set(\u0027pdfUrl\u0027, body.pdf.url); next(\u00273. Download PDF\u0027); }",
+                                    "  else { next(null); }",
+                                    "  return;",
+                                    "}",
+                                    "if (count \u003e= 60) { console.log(\u0027Still not finished after about 15 minutes; stopping.\u0027); next(null); return; }",
+                                    "// Wait 15 seconds (the sandbox waits for this timer), then ask again.",
+                                    "setTimeout(() =\u003e {}, 15000);",
+                                    "next(\u00272. Wait until finished\u0027);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "{{jobId}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "3. Download PDF",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027PDF downloaded\u0027, () =\u003e {",
+                                    "  pm.response.to.have.status(200);",
+                                    "  pm.expect(pm.response.headers.get(\u0027Content-Type\u0027)).to.include(\u0027pdf\u0027);",
+                                    "});",
+                                    "console.log(\u0027PDF link:\u0027, pm.collectionVariables.get(\u0027pdfUrl\u0027));",
+                                    "if (pm.execution \u0026\u0026 pm.execution.setNextRequest) { pm.execution.setNextRequest(null); } else { postman.setNextRequest(null); }"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{pdfUrl}}",
+                            "host": [
+                                "{{pdfUrl}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Error examples",
+            "description": "What the API returns for common mistakes.",
+            "item": [
+                {
+                    "name": "401 – missing API key",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Rejected without key (401)\u0027, () =\u003e pm.response.to.have.status(401));"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/job-2026-01-01T00-00-00Z_00000000-0000-4000-8000-000000000000",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "job-2026-01-01T00-00-00Z_00000000-0000-4000-8000-000000000000"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "400 – invalid payload",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Rejected with a reason (400)\u0027, () =\u003e pm.response.to.have.status(400));",
+                                    "console.log(pm.response.json().error);"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Jane Coach\",\n  \"email\": \"not-an-email\",\n  \"quality\": \"ultra\",\n  \"images\": [\"http://example.com/front.jpg\"]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "404 – unknown job",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "type": "text/javascript",
+                                "exec": [
+                                    "pm.test(\u0027Unknown job (404)\u0027, () =\u003e pm.response.to.have.status(404));"
+                                ]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/jobs/job-2026-01-01T00-00-00Z_00000000-0000-4000-8000-000000000000",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "jobs",
+                                "job-2026-01-01T00-00-00Z_00000000-0000-4000-8000-000000000000"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ]
+}

@@ -9,7 +9,7 @@ const dir = mkdtempSync(path.join(tmpdir(), "proof-job-"));
 const outfile = path.join(dir, "check.cjs");
 try {
   execFileSync(path.join(root, "node_modules/esbuild/bin/esbuild"), [
-    path.join(root, "lib/proof-job.check.ts"),
+    path.join(root, "lambda/check/jobs.check.ts"),
     "--bundle",
     "--platform=node",
     "--format=cjs",
